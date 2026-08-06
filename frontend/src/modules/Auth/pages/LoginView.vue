@@ -1,6 +1,7 @@
 <script setup>
 import { reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
+import axios from 'axios';
 // Eğer stores klasörünü 'src/stores' olarak oluşturduysanız:
 import { useAuthStore } from '@/stores/auth.js';
 // Eğer 'src/modules/Auth/store/authStore.js' olarak oluşturduysanız import yolunu ona göre güncelleyin.
@@ -13,22 +14,60 @@ const form = reactive({
   password: '',
 });
 
+const isRegister = ref(false);
 const loading = ref(false);
 const errorMessage = ref('');
+const successMessage = ref('');
 
-const handleLogin = async () => {
+// .env dosyasından API adresi okunuyor
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api';
+
+const toggleMode = () => {
+  isRegister.value = !isRegister.value;
+  errorMessage.value = '';
+  successMessage.value = '';
+  form.username = '';
+  form.password = '';
+};
+
+const handleSubmit = async () => {
   loading.value = true;
   errorMessage.value = '';
+  successMessage.value = '';
 
   try {
-    await authStore.login(form);
-    // Giriş başarılı olunca çizelgeleme sayfasına yönlendir
-    router.push('/schedule');
+    if (isRegister.value) {
+      // KAYIT OLMA İŞLEMİ
+      const response = await axios.post(`${API_BASE_URL}/auth/register/`, form);
+      successMessage.value = response.data.message || 'Kayıt başarılı! Admin onayından sonra giriş yapabilirsiniz.';
+
+      // 2 saniye sonra otomatik giriş ekranına döndür
+      setTimeout(() => {
+        isRegister.value = false;
+        successMessage.value = '';
+      }, 2000);
+    } else {
+      // GİRİŞ YAPMA İŞLEMİ
+      await authStore.login(form);
+      router.push('/schedule');
+    }
   } catch (err) {
-    errorMessage.value =
-      err.response?.data?.detail ||
-      err.response?.data?.non_field_errors?.[0] ||
-      'Giriş yapılamadı. Bilgilerinizi kontrol edin.';
+    if (err.response && err.response.data) {
+      const data = err.response.data;
+      if (data.detail) {
+        errorMessage.value = data.detail;
+      } else if (data.username) {
+        errorMessage.value = `Kullanıcı adı hatası: ${data.username.join(' ')}`;
+      } else if (data.password) {
+        errorMessage.value = `Şifre hatası: ${data.password.join(' ')}`;
+      } else if (data.error) {
+        errorMessage.value = data.error;
+      } else {
+        errorMessage.value = 'Lütfen girdiğiniz bilgileri kontrol edin.';
+      }
+    } else {
+      errorMessage.value = 'Sunucuya bağlanılamadı. Lütfen backend sunucusunu kontrol edin.';
+    }
   } finally {
     loading.value = false;
   }
@@ -36,37 +75,49 @@ const handleLogin = async () => {
 </script>
 
 <template>
-<div class="login-wrapper">
-  <div class="login-card">
-    <h2>Hastane Planlama Sistemi</h2>
-    <form @submit.prevent="handleLogin">
-      <div class="form-group">
-        <label for="username">KullanıcıAdı</label>
-        <input
-          id="username"
-          v-model="form.username"
-          type="text"
-          required
-          placeholder="Kullanıcı adınızı girin"
+  <div class="login-wrapper">
+    <div class="login-card">
+      <h2>Hastane Planlama Sistemi</h2>
+      <h3 class="auth-subtitle">{{ isRegister ? 'Kayıt Ol' : 'Giriş Yap' }}</h3>
+
+      <form @submit.prevent="handleSubmit">
+        <div class="form-group">
+          <label for="username">Kullanıcı Adı</label>
+          <input
+            id="username"
+            v-model="form.username"
+            type="text"
+            required
+            placeholder="Kullanıcı adınızı girin"
           />
-      </div>
-      <div class="form-group">
-        <label for="password">Şifre</label>
-        <input
-          id="password"
-          v-model="form.password"
-          type="password"
-          required
-          placeholder="Şifrenizi girin"
+        </div>
+
+        <div class="form-group">
+          <label for="password">Şifre</label>
+          <input
+            id="password"
+            v-model="form.password"
+            type="password"
+            required
+            placeholder="Şifrenizi girin"
           />
+        </div>
+
+        <button type="submit" :disabled="loading">
+          {{ loading ? 'İşleniyor...' : (isRegister ? 'Hesap Oluştur' : 'Giriş Yap') }}
+        </button>
+
+        <p v-if="errorMessage" class="error-message">{{ errorMessage }}</p>
+        <p v-if="successMessage" class="success-message">{{ successMessage }}</p>
+      </form>
+
+      <div class="toggle-mode">
+        <span @click="toggleMode">
+          {{ isRegister ? 'Zaten hesabınız var mı? Giriş Yapın' : 'Hesabınız yok mu? Kayıt Olun' }}
+        </span>
       </div>
-      <button type="submit" :disabled="loading">
-          {{ loading ? 'Giriş Yapılıyor...' : 'Giriş Yap' }}
-      </button>
-      <p v-if="errorMessage" class="error-message">{{errorMessage}}</p>
-    </form>
+    </div>
   </div>
-</div>
 </template>
 
 <style scoped>
@@ -88,10 +139,18 @@ const handleLogin = async () => {
 }
 
 h2 {
-  margin-bottom: 1.5rem;
+  margin-bottom: 0.5rem;
   font-size: 1.5rem;
   text-align: center;
   color: #1e293b;
+}
+
+.auth-subtitle {
+  margin-bottom: 1.5rem;
+  font-size: 1.1rem;
+  text-align: center;
+  color: #64748b;
+  font-weight: 500;
 }
 
 .form-group {
@@ -146,5 +205,29 @@ button:disabled {
   color: #dc2626;
   font-size: 0.875rem;
   text-align: center;
+}
+
+.success-message {
+  margin-top: 1rem;
+  color: #16a34a;
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.toggle-mode {
+  margin-top: 1.5rem;
+  text-align: center;
+}
+
+.toggle-mode span {
+  color: #2563eb;
+  cursor: pointer;
+  font-size: 0.875rem;
+  text-decoration: underline;
+  font-weight: 500;
+}
+
+.toggle-mode span:hover {
+  color: #1d4ed8;
 }
 </style>
