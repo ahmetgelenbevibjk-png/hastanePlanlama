@@ -1,88 +1,165 @@
-<script setup>
-import {TIME_SLOTS} from '@/config/constants';
-
-const props=defineProps({
-  rooms:{type:Array,required:true},
-  operations:{type:Array,required:true},
-});
-
-const timeSlots=TIME_SLOTS;
-
-const getOperationsForCell=(rromId,slotId)=>{
-  return props.operations.filter(
-      op=>op.required_room===roomId&& op.start_slot===slotId
-  );
-};
-
-</script>
-
 <template>
-<div class="grid-wrapper" v-if="rooms.length>0">
-  <table class="schedule-table">
-    <thead>
-    <tr>
-      <th class="sticky-col">Saat / Oda </th>
-      <th v-for="room in rooms" :key="room.id">
-        {{room.name}}<br />
-        <small>{{room.specialty}}</small>
-      </th>
-    </tr>
-    </thead>
-    <tbody>
-    <tr v-for="slot in timeSlots" :key="slot.id">
-      <td class="time-col">{{slot.time}}</td>
-      <td v-for="room in rooms" :key="room.id" class="slot-cell">
-        <div
-          v-for="op in getOperationsForCell(room.id,slot.id)"
-          :key="op.id"
-          class="operation-card"
-          :class="op.priority?.toLowerCase()"
-          >
-          <strong>{{ op.patient_name }}</strong>
-              <span>{{ op.operation_name }}</span>
-        </div>
-      </td>
-    </tr>
-    </tbody>
-  </table>
-</div>
+  <div class="schedule-grid-container">
+    <div class="table-wrapper">
+      <table class="timeline-table">
+        <thead>
+          <tr>
+            <th class="room-column">Salon / Saat</th>
+            <th v-for="time in timeSlots" :key="time" class="time-header">
+              {{ time }}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- Salonlar Listesi -->
+          <tr v-for="room in rooms" :key="room.id">
+            <td class="room-cell">
+              <strong>{{ room.name }}</strong>
+              <span v-if="room.type" class="room-capacity">{{ room.type }}</span>
+            </td>
 
+            <!-- Saat Dilimleri -->
+            <td v-for="time in timeSlots" :key="time" class="slot-cell">
+              <div
+                v-if="getOperationForSlot(room.id, time)"
+                class="operation-card"
+                :class="getOperationForSlot(room.id, time).status || 'planned'"
+              >
+                <div class="op-title">{{ getOperationForSlot(room.id, time).name }}</div>
+                <div class="op-surgeon">👨‍⚕️ {{ getOperationForSlot(room.id, time).surgeon }}</div>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Eğer hiç salon/veri eklenmediyse -->
+          <tr v-if="rooms.length === 0">
+            <td :colspan="timeSlots.length + 1" class="no-data">
+              Henüz tanımlanmış bir ameliyathane salonu bulunmuyor. "Salonlar" sekmesinden yeni salon ekleyebilirsiniz.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
 </template>
 
+<script setup>
+import { ref } from 'vue'
+
+const props = defineProps({
+  date: {
+    type: String,
+    required: true
+  },
+  // Dışarıdan veya API'den gelecek olan gerçek veriler
+  rooms: {
+    type: Array,
+    default: () => []
+  },
+  operations: {
+    type: Array,
+    default: () => []
+  }
+})
+
+// Saat Dilimleri (08:00 - 16:00)
+const timeSlots = ref([
+  '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00','17:00','18:00'
+])
+
+const getOperationForSlot = (roomId, time) => {
+  return props.operations.find(op => op.roomId === roomId && op.time === time)
+}
+</script>
+
 <style scoped>
-.grid-wrapper{
-  overflow-x:auto;
+.schedule-grid-container {
+  width: 100%;
+  overflow-x: auto;
 }
-.schedule-table {width:100%;
-border-collapse:collapse;
-background:white;
+
+.table-wrapper {
+  min-width: 900px;
 }
-.schedule-table th, .schedule-table td {
-  border:1px solid #e2e8f0;
-  padding:8px;
-  text-align:center;
+
+.timeline-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: white;
 }
-.time-col{
-  font-weight: bold;
-  background-color:#f1f5f9;
-  width:120px;
+
+.timeline-table th, .timeline-table td {
+  border: 1px solid #e2e8f0;
+  padding: 10px;
+  text-align: center;
 }
+
+.room-column {
+  width: 180px;
+  background-color: #f8fafc;
+  font-weight: 600;
+  color: #334155;
+  text-align: left !important;
+  padding-left: 16px !important;
+}
+
+.time-header {
+  background-color: #f1f5f9;
+  color: #475569;
+  font-size: 0.85rem;
+  font-weight: 600;
+  width: 100px;
+}
+
+.room-cell {
+  text-align: left !important;
+  padding-left: 16px !important;
+  background-color: #f8fafc;
+}
+
+.room-capacity {
+  display: block;
+  font-size: 0.75rem;
+  color: #64748b;
+  font-weight: normal;
+}
+
 .slot-cell {
-  height:60px;
-  vertical-align:top;
-  width:180px;
+  height: 70px;
+  vertical-align: middle;
+  padding: 4px !important;
+  background-color: #ffffff;
 }
+
 .operation-card {
-  background-color: #e0f2fe;
-  border-left: 4px solid #0284c7;
-  padding: 6px;
-  border-radius: 4px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 0.75rem;
   text-align: left;
-  font-size: 0.85rem; }
-.operation-card.critical {
-  background-color: #fee2e2;
-  border-left-color: #ef4444; }
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
 
+.op-title {
+  font-weight: 700;
+}
 
+.op-surgeon {
+  font-size: 0.7rem;
+  opacity: 0.9;
+}
 
+.operation-card.planned {
+  background-color: #e0f2fe;
+  color: #0369a1;
+  border-left: 3px solid #0284c7;
+}
+
+.no-data {
+  padding: 30px;
+  color: #64748b;
+  font-size: 0.9rem;
+}
 </style>

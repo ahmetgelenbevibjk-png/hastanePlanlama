@@ -68,7 +68,8 @@ class HospitalScheduler:
                 op.assigned_anesthesia=suitable_anesthesia
                 op.start_slot=start_slot +1
                 return True
-            return False
+
+        return False
 
 
     def _find_free_anesthesia(self,start_slot,end_slot):
@@ -78,17 +79,3 @@ class HospitalScheduler:
 
         return None
     
-
-
-
-
-
-
-
-
-
-
-
-
-
-

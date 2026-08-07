@@ -1,6 +1,10 @@
-from rest_framework import viewsets,permissions
-from rest_framework.filters import SearchFilter,OrderingFilter
+from rest_framework import viewsets,status
+from rest_framework.response import Response
 
 class BaseViewSet(viewsets.ModelViewSet):
-    permissions_classes= [permissions.IsAuthenticated]
-    filter_backends=[SearchFilter,OrderingFilter]
+    def get_queryset(self):
+        return super().get_queryset().filter(is_active=True)
+
+    def perform_destroy(self,instance):
+        instance.is_active=False
+        instance.save()

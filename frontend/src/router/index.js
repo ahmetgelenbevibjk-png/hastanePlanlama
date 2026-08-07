@@ -3,21 +3,51 @@ import { useAuthStore } from '@/stores/auth';
 
 const routes = [
   {
+    path: '/',
+    redirect: '/schedule',
+  },
+  {
     path: '/login',
     name: 'Login',
-    // Dosya adınız LoginView.vue ise:
     component: () => import('@/modules/Auth/pages/LoginView.vue'),
     meta: { requiresGuest: true },
   },
   {
     path: '/schedule',
     name: 'Schedule',
-    // Klasörünüzdeki dosya ScheduleView.vue ise 'ScheduleView.vue' yazın:
     component: () => import('@/modules/Schedule/pages/ScheduleView.vue'),
     meta: { requiresAuth: true },
   },
+
+  // VERİ YÖNETİM SAYFALARI (NAVBAR ROTALARI)
   {
-    path: '/',
+    path: '/rooms',
+    name: 'Rooms',
+    component: () => import('@/modules/Rooms/pages/RoomsView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/surgeons',
+    name: 'Surgeons',
+    component: () => import('@/modules/Surgeons/pages/SurgeonsView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/anesthesia',
+    name: 'Anesthesia',
+    component: () => import('@/modules/Anesthesia/pages/AnesthesiaView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/operations',
+    name: 'Operations',
+    component: () => import('@/modules/Operations/pages/OperationsView.vue'),
+    meta: { requiresAuth: true },
+  },
+
+  // Tanımsız yollar için (404) Otomatik Yönlendirme
+  {
+    path: '/:pathMatch(.*)*',
     redirect: '/schedule',
   },
 ];
