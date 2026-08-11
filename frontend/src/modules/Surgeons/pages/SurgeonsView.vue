@@ -1,57 +1,74 @@
 <script setup>
-import {ref, onMounted} from 'vue'
-import {surgeonService} from  '../services/surgeonService'
+import { ref, onMounted } from 'vue'
+import { surgeonService } from '../services/surgeonService'
 
-const surgeons=ref ([])
-const loading=ref(false)
-const submitting=ref (false)
-const error=ref(null)
+const surgeons = ref([])
+const loading = ref(false)
+const submitting = ref(false)
+const error = ref(null)
 
-const newSurgeon= ref({
-  name:'',
-  specialty:''
+const newSurgeon = ref({
+  name: '',
+  specialty: '',
+  off_day: ''
 })
 
-const fetchSurgeons= async()=> {
-  loading.value=true
-  error.value=null
+const daysOfWeek = [
+  { value: 'monday', label: 'Pazartesi' },
+  { value: 'tuesday', label: 'Salı' },
+  { value: 'wednesday', label: 'Çarşamba' },
+  { value: 'thursday', label: 'Perşembe' },
+  { value: 'friday', label: 'Cuma' },
+  { value: 'saturday', label: 'Cumartesi' },
+  { value: 'sunday', label: 'Pazar' }
+]
+
+const fetchSurgeons = async () => {
+  loading.value = true
+  error.value = null
   try {
     const response = await surgeonService.getAll()
-    surgeons.value= response.data
-  }catch (err){
-    error.value= 'Cerrah listesi yüklenirken hata oluştu.'
+    surgeons.value = Array.isArray(response.data) ? response.data : (response.data.results || [])
+  } catch (err) {
+    error.value = 'Cerrah listesi yüklenirken hata oluştu.'
     console.error(err)
-  }finally {
-    loading.value =false
+  } finally {
+    loading.value = false
   }
 }
 
-const handleCreate= async() => {
-  if(!newSurgeon.value.name.trim()) return
+const handleCreate = async () => {
+  if (!newSurgeon.value.name.trim()) return
 
-  submitting.value =true
+  submitting.value = true
   try {
     await surgeonService.create(newSurgeon.value)
-    newSurgeon.value ={name: '', specialty: ''}
+    newSurgeon.value = { name: '', specialty: '', off_day: '' }
     await fetchSurgeons()
-  }catch(err){
-    alert ('Cerrah eklenirken hata oluştu!')
+  } catch (err) {
+    alert('Cerrah eklenirken hata oluştu!')
     console.error(err)
-  }finally {
-    submitting.value =false
+  } finally {
+    submitting.value = false
   }
 }
 
-const handleDelete =async (id) => {
+const handleDelete = async (id) => {
   if (!confirm('Bu doktoru pasife almak istediğinize emin misiniz?')) return
 
   try {
     await surgeonService.delete(id)
     await fetchSurgeons()
-  }catch(err) {
-    alert ('Silme işlemi başarısız')
+  } catch (err) {
+    alert('Silme işlemi başarısız.')
     console.error(err)
   }
+}
+
+const formatDay = (dayKey) => {
+  if (!dayKey) return 'İzin Yok'
+  const found = daysOfWeek.find(d => d.value.toLowerCase() === dayKey.toLowerCase())
+  return found ? found.label : dayKey
 }
 
 onMounted(() => {
@@ -97,9 +114,19 @@ onMounted(() => {
               id="specialty"
               v-model="newSurgeon.specialty"
               type="text"
-              placeholder="Örn: Genek Cerrahi, Kalp Damar, Ortopedi"
+              placeholder="Örn: Genel Cerrahi, Kalp Damar, Ortopedi"
               required
             />
+          </div>
+
+          <div class="form-group">
+            <label for="offDay">İzinli Gün (İsteğe Bağlı)</label>
+            <select id="offDay" v-model="newSurgeon.off_day" class="styled-select">
+              <option value="">İzin Günü Yok</option>
+              <option v-for="d in daysOfWeek" :key="d.value" :value="d.value">
+                {{ d.label }}
+              </option>
+            </select>
           </div>
 
           <button type="submit" class="btn-primary" :disabled="submitting">
@@ -137,6 +164,7 @@ onMounted(() => {
                 <th>ID</th>
                 <th>Doktor Adı</th>
                 <th>Uzmanlık Alanı</th>
+                <th>İzin Günü</th>
                 <th>Durum</th>
                 <th class="text-right">İşlemler</th>
               </tr>
@@ -150,6 +178,11 @@ onMounted(() => {
                 </td>
                 <td>
                   <span class="specialty-badge">{{ surgeon.specialty || 'Genel Cerrahi' }}</span>
+                </td>
+                <td>
+                  <span class="offday-badge" :class="{ 'has-offday': surgeon.off_day }">
+                    {{ formatDay(surgeon.off_day) }}
+                  </span>
                 </td>
                 <td>
                   <span class="status-badge active">
@@ -181,56 +214,56 @@ onMounted(() => {
 .page-container {
   max-width: 1200px;
   margin: 0 auto;
-  padding :30px 20px;
-  font-family:-apple-system,blinkMacSystemFont,'segoe UI',Roboto,Helvetica,Arial,sans-serif;
-  color : #1e293b;
+  padding: 30px 20px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  color: #1e293b;
 }
 
 .page-header {
-  margin-bottom:28px;
+  margin-bottom: 28px;
 }
 
 .page-header h2 {
   font-size: 24px;
-  font-weight:700;
-  color:#0f172a;
+  font-weight: 700;
+  color: #0f172a;
   margin: 0 0 6px 0;
 }
 
 .subtitle {
   color: #64748b;
-  font-size:14px;
+  font-size: 14px;
   margin: 0;
 }
 
 .content-grid {
   display: grid;
   grid-template-columns: 360px 1fr;
-  gap:24px;
+  gap: 24px;
   align-items: start;
 }
 
-@media (max-width:900px) {
+@media (max-width: 900px) {
   .content-grid {
-    grid-template-columns:1fr;
+    grid-template-columns: 1fr;
   }
 }
 
 .card {
   background: #ffffff;
-  border-radius:12px;
+  border-radius: 12px;
   border: 1px solid #e2e8f0;
-  box-shadow:0 4px 6px -1px rgba(0,0,0,0.05);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
   padding: 24px;
 }
 
-.card-header{
-  display : flex;
+.card-header {
+  display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom:20px;
-  padding-bottom:16px;
-  border-bottom:1px solid #f1f5f9;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #f1f5f9;
 }
 
 .card-header.space-between {
@@ -239,79 +272,82 @@ onMounted(() => {
 
 .title-with-icon {
   display: flex;
-  align-items:center;
-  gap : 12px;
+  align-items: center;
+  gap: 12px;
 }
 
 .card-header h3 {
-  font-size:16px;
-  font-weight:600;
+  font-size: 16px;
+  font-weight: 600;
   color: #1e293b;
   margin: 0;
 }
 
 .icon-wrapper {
-  background:#eff6ff;
+  background: #eff6ff;
   color: #2563eb;
-  padding:8px;
-  border-radius:8px;
-  display:flex;
-  align-items:center;
+  padding: 8px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
   justify-content: center;
 }
 
 .count-badge {
-  background : #f1f5f9;
+  background: #f1f5f9;
   color: #475569;
-  font-size:12px;
-  font-weight:600;
-  padding:4px 10px;
-  border-radius:20px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 20px;
 }
 
 .styled-form {
   display: flex;
-  flex-direction:column;
-  gap:18px;
+  flex-direction: column;
+  gap: 18px;
 }
 
 .form-group {
-  display:flex;
+  display: flex;
   flex-direction: column;
-  gap:6px;
+  gap: 6px;
 }
 
 .form-group label {
-  font-size:13px;
-  font-weight:600;
+  font-size: 13px;
+  font-weight: 600;
   color: #475569;
 }
 
-.form-group input {
-  padding:10px 14px;
+.form-group input,
+.styled-select {
+  padding: 10px 14px;
   border: 1px solid #cbd5e1;
-  border-radius:8px;
-  font-size:14px;
+  border-radius: 8px;
+  font-size: 14px;
   transition: all 0.2s ease;
   outline: none;
+  background-color: #fff;
 }
 
-.form-group input:focus {
+.form-group input:focus,
+.styled-select:focus {
   border-color: #2563eb;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
 }
 
 .btn-primary {
   background: #2563eb;
-  color:white;
+  color: white;
   border: none;
   padding: 11px 16px;
-  border-radius:8px;
+  border-radius: 8px;
   font-weight: 600;
-  font-size:14px;
+  font-size: 14px;
   cursor: pointer;
-  transition:background 0.2s ease;
-  width:100%;
+  transition: background 0.2s ease;
+  width: 100%;
 }
 
 .btn-primary:hover {
@@ -320,22 +356,22 @@ onMounted(() => {
 
 .btn-primary:disabled {
   background: #94a3b8;
-  cursor:not-allowed;
+  cursor: not-allowed;
 }
 
 .btn-danger-outline {
-  background:transparent;
-  color:#ef4444;
-  border:1px solid #fca5a5;
-  padding:6px 12px;
-  border-radius:6px;
-  font-size:13px;
-  font-weight:500;
-  cursor:pointer;
-  display:inline-flex;
-  align-items:center;
+  background: transparent;
+  color: #ef4444;
+  border: 1px solid #fca5a5;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
-  transition:all 0.2s ease;
+  transition: all 0.2s ease;
 }
 
 .btn-danger-outline:hover {
@@ -348,53 +384,47 @@ onMounted(() => {
 }
 
 .styled-table {
-  width:100%;
-  border-collapse:collapse ;
-  text-align:left;
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
 }
 
 .styled-table th {
   background: #f8fafc;
-  color:#64748b;
-  font-size:12px;
-  font-weight:600;
-  text-transform:uppercase;
-  padding:12px 16px;
-  border-bottom:1px solid #e2e8f0;
-}
-
-.styled-table td {
-  padding:14px 16px;
-  border-bottom:1px solid #f1f5f9;
-  font-size:14px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e2e8f0;
 }
 
 .styled-table td {
   padding: 14px 16px;
-  border-bottom:1px solid #f1f5f9;
-  font-size:14px;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 14px;
 }
 
 .styled-table tr:hover td {
   background: #f8fafc;
 }
 
-.id-cell{
-  color:#94a3b8;
-  font-weight:600;
-  font-size:13px;
+.id-cell {
+  color: #94a3b8;
+  font-weight: 600;
+  font-size: 13px;
 }
 
 .name-cell {
-  display:flex;
+  display: flex;
   align-items: center;
-  gap:10px;
-  font-weight:600;
-  color:#0f172a;
+  gap: 10px;
+  font-weight: 600;
+  color: #0f172a;
 }
 
 .avatar-icon {
-  font-size : 18px;
+  font-size: 18px;
 }
 
 .specialty-badge {
@@ -402,25 +432,42 @@ onMounted(() => {
   color: #166534;
   padding: 4px 10px;
   border-radius: 6px;
-  font-size:12px;
-  font-weight:500;
+  font-size: 12px;
+  font-weight: 500;
   border: 1px solid #bbf7d0;
 }
 
+.offday-badge {
+  background: #f8fafc;
+  color: #64748b;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid #e2e8f0;
+}
+
+.offday-badge.has-offday {
+  background: #fff7ed;
+  color: #c2410c;
+  border-color: #ffedd5;
+  font-weight: 600;
+}
+
 .text-right {
-  text-align:right;
+  text-align: right;
 }
 
 .status-badge.active {
-  display:inline-flex;
-  align-items:center;
-  gap:6px;
-  background:#dcfce7;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #dcfce7;
   color: #15803d;
-  font-size:12px;
-  font-weight:600;
+  font-size: 12px;
+  font-weight: 600;
   padding: 4px 10px;
-  border-radius:20px;
+  border-radius: 20px;
 }
 
 .status-badge .dot {
@@ -454,5 +501,4 @@ onMounted(() => {
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
-
 </style>

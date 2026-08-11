@@ -9,7 +9,6 @@ const error= ref(null)
 
 const newTeam=ref({
   name:'',
-  shift:''
 })
 
 const fetchTeams=async ()=> {
@@ -32,7 +31,7 @@ const handleCreate= async () => {
   submitting.value=true
   try {
     await anesthesiaService.create(newTeam.value)
-    newTeam.value={name:'',shift:''}
+    newTeam.value={name:''}
     await fetchTeams()
   }catch(err) {
     alert('Ekip eklenirken hata oluştu!')
@@ -42,7 +41,7 @@ const handleCreate= async () => {
   }
 }
 
-const handDelete= async(id)=> {
+const handleDelete= async(id)=> {
   if(!confirm('Bu anestezi ekibini pasife almak istediğinize emin misiniz?')) return
 
   try{
@@ -93,15 +92,7 @@ onMounted(() => {
             />
           </div>
 
-          <div class="form-group">
-            <label for="shift">Vardiya / Çalışma Saatleri</label>
-            <input
-              id="shift"
-              v-model="newTeam.shift"
-              type="text"
-              placeholder="Örn: 08:00 - 16:00"
-            />
-          </div>
+
 
           <button type="submit" class="btn-primary" :disabled="submitting">
             <span v-if="submitting">Ekleniyor...</span>

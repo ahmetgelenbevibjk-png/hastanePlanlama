@@ -3,16 +3,20 @@
 
     <Navbar v-if="showNavbar" />
 
+    <Sidebar/>
+
     <main class="main-content">
           <router-view />
     </main>
   </div>
+
 </template>
 
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import Navbar from './modules/navbar/components/Navbar.vue'
+import Sidebar from "@modules/sidebar/pages/Sidebar.vue";
 
 const route = useRoute()
 
@@ -30,6 +34,10 @@ body {
 }
 
 .main-content {
+  margin-left:72px;
+  margin-top:60px;
+  min-height:calc(100vh - 60px);
+  background-color: #f8fafc;
   padding:24px;
 }
 

@@ -25,8 +25,18 @@
               id="roomName"
               v-model="newRoom.name"
               type="text"
-              placeholder="Örn: Salon 1 (OR-A)"
+              placeholder="Örn: OR-2 veya Salon 1"
               required
+            />
+          </div>
+
+          <div class="form-group">
+            <label for="specialtyType">Özel Uzmanlık / Tipi (İsteğe Bağlı)</label>
+            <input
+              id="specialtyType"
+              v-model="newRoom.specialty_type"
+              type="text"
+              placeholder="Örn: Kalp Anjiyo, Omurga vb."
             />
           </div>
 
@@ -64,6 +74,7 @@
               <tr>
                 <th>ID</th>
                 <th>Salon Adı</th>
+                <th>Uzmanlık / Tip</th>
                 <th>Durum</th>
                 <th class="text-right">İşlemler</th>
               </tr>
@@ -74,6 +85,9 @@
                 <td class="name-cell">
                   <div class="room-icon">🏥</div>
                   <span>{{ room.name }}</span>
+                </td>
+                <td>
+                  <span class="type-badge">{{ room.specialty_type || 'Genel Ameliyathane' }}</span>
                 </td>
                 <td>
                   <span class="status-badge active">
@@ -111,7 +125,8 @@ const submitting = ref(false)
 const error = ref(null)
 
 const newRoom = ref({
-  name: ''
+  name: '',
+  specialty_type: ''
 })
 
 const fetchRooms = async () => {
@@ -119,7 +134,7 @@ const fetchRooms = async () => {
   error.value = null
   try {
     const response = await roomService.getAll()
-    rooms.value = response.data
+    rooms.value = Array.isArray(response.data) ? response.data : (response.data.results || [])
   } catch (err) {
     error.value = 'Ameliyathaneler yüklenirken hata oluştu.'
     console.error(err)
@@ -134,7 +149,7 @@ const handleCreate = async () => {
   submitting.value = true
   try {
     await roomService.create(newRoom.value)
-    newRoom.value.name = ''
+    newRoom.value = { name: '', specialty_type: '' }
     await fetchRooms()
   } catch (err) {
     alert('Salon eklenirken hata oluştu!')
@@ -187,7 +202,6 @@ onMounted(() => {
   margin: 0;
 }
 
-/* GRID YAPISI */
 .content-grid {
   display: grid;
   grid-template-columns: 360px 1fr;
@@ -201,12 +215,11 @@ onMounted(() => {
   }
 }
 
-/* KART TASARIMI */
 .card {
   background: #ffffff;
   border-radius: 12px;
   border: 1px solid #e2e8f0;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
   padding: 24px;
 }
 
@@ -255,7 +268,6 @@ onMounted(() => {
   border-radius: 20px;
 }
 
-/* FORM TASARIMI */
 .styled-form {
   display: flex;
   flex-direction: column;
@@ -288,7 +300,6 @@ onMounted(() => {
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
 }
 
-/* BUTONLAR */
 .btn-primary {
   background: #2563eb;
   color: white;
@@ -331,7 +342,6 @@ onMounted(() => {
   border-color: #ef4444;
 }
 
-/* TABLO TASARIMI */
 .table-wrapper {
   overflow-x: auto;
 }
@@ -348,7 +358,6 @@ onMounted(() => {
   font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
   padding: 12px 16px;
   border-bottom: 1px solid #e2e8f0;
 }
@@ -381,11 +390,20 @@ onMounted(() => {
   font-size: 16px;
 }
 
+.type-badge {
+  background: #f0f9ff;
+  color: #0369a1;
+  border: 1px solid #bae6fd;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
 .text-right {
   text-align: right;
 }
 
-/* BADGE / DURUM ETİKETİ */
 .status-badge.active {
   display: inline-flex;
   align-items: center;
@@ -405,21 +423,10 @@ onMounted(() => {
   border-radius: 50%;
 }
 
-/* DURUM EKRANLARI (Yükleniyor / Boş) */
 .state-container {
   padding: 40px 20px;
   text-align: center;
   color: #64748b;
-}
-
-.state-container.empty p {
-  margin: 8px 0 4px 0;
-  font-weight: 600;
-  color: #334155;
-}
-
-.state-container.empty small {
-  color: #94a3b8;
 }
 
 .empty-icon {

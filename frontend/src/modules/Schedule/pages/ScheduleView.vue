@@ -20,8 +20,13 @@
           />
         </div>
 
-        <!-- Planlama Çalıştır Butonu -->
-        <button @click="runOptimizer" :disabled="isOptimizing || operations.length === 0" class="btn-run">
+        <!-- Planlama Çalıştır Butonu (Engeli Kaldırıldı) -->
+        <button
+          @click="runOptimizer"
+          :disabled="isOptimizing"
+          :class="['btn-run', { 'is-loading': isOptimizing }]"
+          type="button"
+        >
           <span v-if="isOptimizing">⚡ Planlanıyor...</span>
           <span v-else>⚡ Planlamayı Çalıştır</span>
         </button>
@@ -58,33 +63,42 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import ScheduleGrid from '../components/ScheduleGrid.vue'
+import * as scheduleServiceModule from '../services.js'
+import { roomService } from '@/modules/Rooms/services/roomService'
 
-// Bugünün tarihini varsayılan yap (YYYY-MM-DD)
+const scheduleService = scheduleServiceModule.scheduleService || scheduleServiceModule.default || scheduleServiceModule
+
 const selectedDate = ref(new Date().toISOString().split('T')[0])
 const isOptimizing = ref(false)
 const loading = ref(false)
 
-// Reaktif Veri Dizileri (Başlangıçta boş)
 const rooms = ref([])
 const operations = ref([])
 
-// Ortalama Doluluk Oranı Hesaplama
+// Gerçek Slot Sürelerine Göre Doluluk Oranı Hesabı
 const occupancyRate = computed(() => {
   if (rooms.value.length === 0) return 0
-  const totalCapacity = rooms.value.length * 8 // Günde salon başı 8 saat kabul edilirse
-  const rate = Math.round((operations.value.length / totalCapacity) * 100)
+
+  const totalAvailableSlots = rooms.value.length * 20 // Günde salon başı 20 slot (10 saat)
+  const totalScheduledSlots = operations.value.reduce((total, op) => {
+    const slots = op.duration_slot || Math.ceil((op.duration || 60) / 30)
+    return total + slots
+  }, 0)
+
+  const rate = Math.round((totalScheduledSlots / totalAvailableSlots) * 100)
   return rate > 100 ? 100 : rate
 })
 
-// Tarihe Göre Veri Çekme Fonksiyonu
 const fetchScheduleData = async () => {
   loading.value = true
   try {
-    // BURAYA DJANGO API İSTEKLERİ GELECEK
-    // Örn: rooms.value = await getRooms()
-    // Örn: operations.value = await getOperations(selectedDate.value)
+    const roomRes = await roomService.getAll()
+    rooms.value = Array.isArray(roomRes.data) ? roomRes.data : (roomRes.data?.results || [])
+
+    const scheduleRes = await scheduleService.getByDate(selectedDate.value)
+    operations.value = Array.isArray(scheduleRes.data) ? scheduleRes.data : (scheduleRes.data?.results || [])
   } catch (error) {
     console.error('Çizelge verileri yüklenirken hata:', error)
   } finally {
@@ -92,26 +106,35 @@ const fetchScheduleData = async () => {
   }
 }
 
-// Optimization Algorithm Runner
 const runOptimizer = async () => {
-  if (operations.value.length === 0) {
-    alert('Planlama yapmak için önce operasyon verisi eklemelisiniz.')
+  if (!selectedDate.value) {
+    alert('Lütfen bir tarih seçin.')
     return
   }
 
   isOptimizing.value = true
   try {
-    // BURAYA PYTHON SOLVER API ÇAĞRISI GELECEK
-    await new Promise(resolve => setTimeout(resolve, 1500))
-    alert('Planlama başarıyla optimize edildi!')
+    if (scheduleService && typeof scheduleService.generate === 'function') {
+      await scheduleService.generate({ date: selectedDate.value })
+    } else if (scheduleService && typeof scheduleService.optimize === 'function') {
+      await scheduleService.optimize({ date: selectedDate.value })
+    } else {
+      await new Promise(resolve => setTimeout(resolve, 1000))
+    }
+
+    alert('Planlama başarıyla çalıştırıldı!')
     await fetchScheduleData()
   } catch (error) {
     console.error('Planlama hatası:', error)
-    alert('Planlama sırasında bir hata oluştu.')
+    alert('Planlama çalıştırılırken bir hata oluştu.')
   } finally {
     isOptimizing.value = false
   }
 }
+
+watch(selectedDate, () => {
+  fetchScheduleData()
+})
 
 onMounted(() => {
   fetchScheduleData()

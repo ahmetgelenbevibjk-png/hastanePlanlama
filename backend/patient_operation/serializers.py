@@ -10,3 +10,12 @@ class PatientOperationSerializer(BaseModelSerializer):
     class Meta:
         model=PatientOperation
         fields='__all__'
+
+    def get_surgeon_name(self,obj):
+        return obj.surgeon.name if obj.surgeon else None
+
+    def get_anesthesia_name(self,obj):
+        return obj.anesthesia.name if obj.anesthesia else None
+
+    def get_required_room_name(self,obj):
+        return obj.required_room.name if obj.required_room else None

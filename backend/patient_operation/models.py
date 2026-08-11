@@ -27,6 +27,11 @@ class PatientOperation(BaseModel):
         verbose_name="Öncelik"
     )
 
+    is_scheduled = models.BooleanField(
+        default=False,
+        verbose_name="Planlandı mı?"
+    )
+
     # İlişkisel Alanlar (Foreign Keys)
     required_room = models.ForeignKey(
         OperatingRoom,
