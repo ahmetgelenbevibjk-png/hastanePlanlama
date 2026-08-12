@@ -1,6 +1,6 @@
 from django.urls import path
-from .views import *  # Veya ilgili view fonksiyonunuz/sınıfınız
+from .views import RunOptimizationAPIView
 
 urlpatterns = [
-    # Örnek: path('run/', ScheduleView.as_view(), name='run-schedule'),
+    path('run/', RunOptimizationAPIView.as_view(), name='run-optimization'),
 ]

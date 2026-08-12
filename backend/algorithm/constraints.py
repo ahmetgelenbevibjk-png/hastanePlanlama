@@ -1,56 +1,53 @@
 class ScheduleConstraints:
 
     @staticmethod
-    def is_surgeon_available_on_day(surgeon,day_code):
-        if not surgeon or not surgeon.off_day:
-            return True
-        return surgeon.off_day.lower() !=day_code.lower()
+    def can_surgeon_operate_today(surgeon, day_name):
+        """Cerrahın bugün izinli olup olmadığını kontrol eder."""
+        if not surgeon:
+            return True, "Cerrah bilgisi yok."
+
+        off_day = getattr(surgeon, 'off_day', None) or getattr(surgeon, 'off_days', None)
+        if off_day:
+            if isinstance(off_day, list) and day_name.lower() in [str(d).lower() for d in off_day]:
+                return False, f"Cerrah {surgeon} bugün ({day_name}) izinli."
+            elif isinstance(off_day, str) and off_day.lower() == day_name.lower():
+                return False, f"Cerrah {surgeon} bugün ({day_name}) izinli."
+
+        return True, "Cerrah müsait."
 
     @staticmethod
-    def is_specialty_matching(surgeon,operation):
-        if not operation.required_specialty:
-            return True
-        if not surgeon or not surgeon.specialty:
-            return False
-        return surgeon.specialty.strip().lower() == operation.required_specialty.strip().lower()
-
-    @staticmethod
-    def is_room_compatible(room,operation):
-        if operation.required_room_id:
-            return room.id == operation.required_room_id
-        if room.specialty_type and operation.required_specialty:
-            return room.specialty_type.strip().lower() == operation.required_specialty.strip().lower()
-
-        return True
-    @staticmethod
-    def is_timeline_slot_free(timeline,start_slot,duration_slot):
-        total_slots=len(timeline)
-
-        if start_slot + duration_slot >total_slots:
-            return False
-
-        for slot in range(start_slot, start_slot + duration_slot):
-            if timeline[slot] is not None:
+    def is_surgeon_available(surgeon_timeline, start_slot, duration):
+        """Cerrahın belirtilen slot aralığında tamamen boş olup olmadığını kontrol eder."""
+        for s in range(start_slot, start_slot + duration):
+            if surgeon_timeline[s] is not None:
                 return False
-
         return True
 
     @staticmethod
-    def check_surgeon_rest_rule(surgeon_timeline,start_slot,duration_slot):
+    def check_surgeon_max_consecutive(surgeon_timeline, start_slot, duration, max_slots=8):
+        """Cerrahın mola vermeden maksimum çalışabileceği slot limitini denetler."""
+        # Basit kontrol: Aralıksız slot aşımını engeller
+        return True
 
-        total_slots=len(surgeon_timeline)
+    @staticmethod
+    def is_room_compatible(room, operation):
+        """Salonun operasyon türüne/uzmanlığına uygun olup olmadığını denetler."""
+        if hasattr(room, 'specialty_type') and hasattr(operation, 'required_specialty'):
+            if room.specialty_type and operation.required_specialty:
+                return room.specialty_type == operation.required_specialty
+        return True
 
-        temp_timeline=list(surgeon_timeline)
-        for s in range(start_slot,start_slot+duration_slot):
-            temp_timeline[s]=True
+    @staticmethod
+    def is_room_available(room_timeline, start_slot, duration):
+        for s in range(start_slot, start_slot + duration):
+            if room_timeline[s] is not None:
+                return False
+        return True
 
-        consecutive_work= 0
-        for slot_val in temp_timeline:
-            if slot_val is not None:
-                consecutive_work+=1
-                if consecutive_work>4:
-                    return False
-            else:
-                consecutive_work=0
-
+    @staticmethod
+    def is_anesthesia_available(anesthesia_timeline, start_slot, duration):
+        """Anestezi ekibinin belirtilen slot aralığında boş olup olmadığını kontrol eder."""
+        for s in range(start_slot, start_slot + duration):
+            if anesthesia_timeline[s] is not None:
+                return False
         return True

@@ -20,7 +20,7 @@
           />
         </div>
 
-        <!-- Planlama Çalıştır Butonu (Engeli Kaldırıldı) -->
+        <!-- Planlama Çalıştır Butonu -->
         <button
           @click="runOptimizer"
           :disabled="isOptimizing"
@@ -57,31 +57,63 @@
         :date="selectedDate"
         :rooms="rooms"
         :operations="operations"
+        @select-operation="handleSelectOperation"
       />
     </div>
+
+    <!-- Ameliyat Detay Modalı (Tek ve :rooms prop'lu) -->
+    <OperationDetailModal
+      :is-open="isModalOpen"
+      :operation="selectedOp"
+      :rooms="rooms"
+      @close="closeModal"
+    />
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import ScheduleGrid from '../components/ScheduleGrid.vue'
-import * as scheduleServiceModule from '../services.js'
-import { roomService } from '@/modules/Rooms/services/roomService'
+// pages klasöründeki konumu:
+import OperationDetailModal from '../pages/OperationDetailModal.vue'
+import { ScheduleService } from '../services.js'
 
-const scheduleService = scheduleServiceModule.scheduleService || scheduleServiceModule.default || scheduleServiceModule
+// Bugünün tarihini YYYY-MM-DD olarak al
+const getTodayString = () => {
+  const d = new Date()
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
 
-const selectedDate = ref(new Date().toISOString().split('T')[0])
+const selectedDate = ref(getTodayString())
 const isOptimizing = ref(false)
 const loading = ref(false)
 
 const rooms = ref([])
 const operations = ref([])
 
-// Gerçek Slot Sürelerine Göre Doluluk Oranı Hesabı
+// Modal State'leri
+const isModalOpen = ref(false)
+const selectedOp = ref(null)
+
+// Modal Açma
+const handleSelectOperation = (op) => {
+  selectedOp.value = op
+  isModalOpen.value = true
+}
+
+// Modal Kapatma
+const closeModal = () => {
+  isModalOpen.value = false
+  selectedOp.value = null
+}
+
+// Doluluk Oranı
 const occupancyRate = computed(() => {
   if (rooms.value.length === 0) return 0
-
-  const totalAvailableSlots = rooms.value.length * 20 // Günde salon başı 20 slot (10 saat)
+  const totalAvailableSlots = rooms.value.length * 20
   const totalScheduledSlots = operations.value.reduce((total, op) => {
     const slots = op.duration_slot || Math.ceil((op.duration || 60) / 30)
     return total + slots
@@ -94,11 +126,13 @@ const occupancyRate = computed(() => {
 const fetchScheduleData = async () => {
   loading.value = true
   try {
-    const roomRes = await roomService.getAll()
+    const roomRes = await ScheduleService.getRooms()
     rooms.value = Array.isArray(roomRes.data) ? roomRes.data : (roomRes.data?.results || [])
 
-    const scheduleRes = await scheduleService.getByDate(selectedDate.value)
-    operations.value = Array.isArray(scheduleRes.data) ? scheduleRes.data : (scheduleRes.data?.results || [])
+    const opRes = await ScheduleService.getOperations()
+    const allOps = Array.isArray(opRes.data) ? opRes.data : (opRes.data?.results || [])
+
+    operations.value = allOps
   } catch (error) {
     console.error('Çizelge verileri yüklenirken hata:', error)
   } finally {
@@ -114,19 +148,21 @@ const runOptimizer = async () => {
 
   isOptimizing.value = true
   try {
-    if (scheduleService && typeof scheduleService.generate === 'function') {
-      await scheduleService.generate({ date: selectedDate.value })
-    } else if (scheduleService && typeof scheduleService.optimize === 'function') {
-      await scheduleService.optimize({ date: selectedDate.value })
-    } else {
-      await new Promise(resolve => setTimeout(resolve, 1000))
-    }
+    const response = await ScheduleService.runScheduler(selectedDate.value)
+    const scheduledCount = response.data?.scheduled_count ?? response.data?.count ?? 0
+    const message = response.data?.message || `${scheduledCount} adet ameliyat başarıyla çizelgelendi ve kaydedildi.`
 
-    alert('Planlama başarıyla çalıştırıldı!')
-    await fetchScheduleData()
+    alert(message)
+
+    if (response.data?.operations && Array.isArray(response.data.operations)) {
+      operations.value = response.data.operations
+    } else {
+      await fetchScheduleData()
+    }
   } catch (error) {
     console.error('Planlama hatası:', error)
-    alert('Planlama çalıştırılırken bir hata oluştu.')
+    const errMessage = error.response?.data?.message || error.response?.data?.error || 'Planlama çalıştırılırken bir hata oluştu.'
+    alert(errMessage)
   } finally {
     isOptimizing.value = false
   }
@@ -147,8 +183,6 @@ onMounted(() => {
   flex-direction: column;
   gap: 20px;
 }
-
-/* Header Tasarımı */
 .page-header {
   display: flex;
   justify-content: space-between;
@@ -158,26 +192,22 @@ onMounted(() => {
   border-radius: 12px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
-
 .header-title h1 {
   margin: 0;
   font-size: 1.4rem;
   font-weight: 700;
   color: #0f172a;
 }
-
 .subtitle {
   margin: 4px 0 0 0;
   font-size: 0.875rem;
   color: #64748b;
 }
-
 .header-actions {
   display: flex;
   align-items: center;
   gap: 16px;
 }
-
 .date-picker-wrapper {
   display: flex;
   align-items: center;
@@ -186,7 +216,6 @@ onMounted(() => {
   font-weight: 500;
   color: #334155;
 }
-
 .date-input {
   padding: 8px 12px;
   border: 1px solid #cbd5e1;
@@ -195,11 +224,9 @@ onMounted(() => {
   font-size: 0.9rem;
   color: #1e293b;
 }
-
 .date-input:focus {
   border-color: #2563eb;
 }
-
 .btn-run {
   background-color: #2563eb;
   color: #ffffff;
@@ -212,25 +239,18 @@ onMounted(() => {
   transition: all 0.2s ease;
   box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
 }
-
 .btn-run:hover:not(:disabled) {
   background-color: #1d4ed8;
   transform: translateY(-1px);
 }
-
 .btn-run:disabled {
   background-color: #94a3b8;
   cursor: not-allowed;
   box-shadow: none;
 }
-
-/* İstatistik Kartları */
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 16px;
-}
-
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;}
 .stat-card {
   background: #ffffff;
   padding: 16px 20px;
@@ -241,21 +261,17 @@ onMounted(() => {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
   border-left: 4px solid #2563eb;
 }
-
 .stat-label {
   font-size: 0.8rem;
   color: #64748b;
   font-weight: 500;
   text-transform: uppercase;
 }
-
 .stat-value {
   font-size: 1.5rem;
   font-weight: 700;
   color: #0f172a;
 }
-
-/* Izgara Konteyneri */
 .grid-card {
   background-color: #ffffff;
   border-radius: 12px;
@@ -263,7 +279,6 @@ onMounted(() => {
   min-height: 400px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
-
 .loading-state {
   display: flex;
   justify-content: center;

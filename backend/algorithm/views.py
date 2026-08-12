@@ -1,75 +1,34 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from datetime import datetime
+from .optimizer import ScheduleOptimizer
 
-from patient_operation.models import PatientOperation
-from room.models import OperatingRoom
-from surgeon.models import Surgeon
-from anesthesia.models import AnesthesiaTeam
-
-class RunSchedulerView(APIView):
+class RunOptimizationAPIView(APIView):
 
     def post(self,request):
-        operations = list(PatientOperation.objects.all())
-        rooms=list(OperatingRoom.objects.all())
-        surgeons=list(Surgeon.objects.all())
-        anesthesia_teams=list(AnesthesiaTeam.objects.all())
+        target_date=request.data.get('date')
 
-        if not operations:
-            return Response(
-                {"detail":"Planlanacak açık ameliyat bulunamadı"},
-            status=status.HTTP_400_BAD_REQUEST
-            )
-        if not rooms or not surgeons:
-            return Response(
-                {"detail":"Algoritmanın çalışması için ooda ve cerrah verileri eksik."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        if not target_date:
+            target_date=datetime.now().strftime("%Y-%m-%d")
 
-        scheduler=HospitalScheduler(
-            operations=operations,
-            rooms=rooms,
-            surgeons=surgeons,
-            anesthesia_teams=anesthesia_teams
-        )
-        result=scheduler.solve()
+        try:
 
-        placed_ops=result["placed"]
-        for op in placed_ops:
-            op.save()
+            optimizer = ScheduleOptimizer(target_date_str=target_date)
+            results=optimizer.optimize()
+            saved_count=optimizer.save_schedule()
 
-        placed_summary = [
-            {
-                "operation_id": op.id,
-                "patient_name": getattr(op, 'patient_name', f"Operation #{op.id}"),
-                "assigned_room_id": op.required_room.id if op.required_room else None,
-                "start_slot": op.start_slot,
-                "duration_slot": op.duration_slot,
-                "time_range": slot_to_time_string(op.start_slot, op.duration_slot)  # Örn: "08:00 - 09:30"
-            }
-            for op in placed_ops
-        ]
-        unplaced_summary=[
-            {
-                "operation_id":op.id,
-                "priority":op.priority,
-                "reason":"Uygun boş slot,oda veya ekip bulunamadı."
-            }
-            for op in result["unplaced"]
-        ]
-        return Response(
-            {
-                "message":"planlama algoritması başarıyla çalıştırıldı",
-                "total_processed":len(operations),
-                "placed_count":len(placed_ops),
-                "unplaced_count":len(result["unplaced"]),
-                "placed_operations":placed_summary,
-                "unplaced_operations":unplaced_summary
-                },
-            status=status.HTTP_200_OK
-        )
+            return Response({
+                'status':'success',
+                'message':f'{saved_count} adet ameliyat başarıyla çizelgelendi ve kaydedildi.',
+                'stats':results
+            },status=status.HTTP_200_OK)
 
-
+        except Exception as e:
+            return Response({
+                'status':'error',
+                'message':f'Optimizasyon sırasında bir hata oluştu:{str(e)}'
+            },status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 

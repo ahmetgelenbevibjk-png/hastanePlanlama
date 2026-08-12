@@ -12,46 +12,50 @@
         </thead>
         <tbody>
           <!-- Salonlar Listesi -->
-          <tr v-for="room in rooms" :key="room.id">
+          <tr v-for="(room, rIndex) in rooms" :key="room.id">
             <td class="room-cell">
               <strong>{{ room.name }}</strong>
               <span v-if="room.specialty_type" class="room-capacity">{{ room.specialty_type }}</span>
             </td>
 
             <!-- 30 Dakikalık Slot Hücreleri -->
-            <template v-for="(slot, index) in timeSlots" :key="slot.time">
+            <template v-for="(slot, sIndex) in timeSlots" :key="slot.time">
               <!-- Eğer bu slotta yeni başlayan bir ameliyat varsa render et -->
               <td
-                v-if="getOperationStartingAtSlot(room.id, index)"
-                :colspan="getOperationStartingAtSlot(room.id, index).duration_slot || 1"
+                v-if="getOpStartingAt(room.id, rIndex, sIndex)"
+                :colspan="getOpStartingAt(room.id, rIndex, sIndex).duration_slot || 1"
                 class="slot-cell occupied"
               >
-                <div class="operation-card planned">
+                <div
+                  class="operation-card planned"
+                  @click="onOperationClick(getOpStartingAt(room.id, rIndex, sIndex))"
+                  :title="`${getOpStartingAt(room.id, rIndex, sIndex).patient_name || 'Hasta'} - Detaylar için tıklayın`"
+                >
                   <div class="op-title">
-                    {{ getOperationStartingAtSlot(room.id, index).patient_name }} -
-                    {{ getOperationStartingAtSlot(room.id, index).operation_name }}
+                    {{ getOpStartingAt(room.id, rIndex, sIndex).patient_name || 'Hasta' }} -
+                    {{ getOpStartingAt(room.id, rIndex, sIndex).operation_name || 'Ameliyat' }}
                   </div>
-                  <div class="op-surgeon" v-if="getOperationStartingAtSlot(room.id, index).surgeon_name">
-                    👨‍⚕️ {{ getOperationStartingAtSlot(room.id, index).surgeon_name }}
+                  <div class="op-surgeon" v-if="getOpStartingAt(room.id, rIndex, sIndex).surgeon">
+                    👨‍⚕️ {{ getOpStartingAt(room.id, rIndex, sIndex).surgeon }}
                   </div>
-                  <div class="op-anesthesia" v-if="getOperationStartingAtSlot(room.id, index).anesthesia_name">
-                    💉 {{ getOperationStartingAtSlot(room.id, index).anesthesia_name }}
+                  <div class="op-anesthesia" v-if="getOpStartingAt(room.id, rIndex, sIndex).anesthesia">
+                    💉 {{ getOpStartingAt(room.id, rIndex, sIndex).anesthesia }}
                   </div>
                   <div class="op-duration">
-                    ⏱️ {{ (getOperationStartingAtSlot(room.id, index).duration_slot || 1) * 30 }} dk
+                    ⏱️ {{ (getOpStartingAt(room.id, rIndex, sIndex).duration_slot || 1) * 30 }} dk
                   </div>
                 </div>
               </td>
 
-              <!-- Eğer bu slot başka bir ameliyatın devamı (colspan içinde) değilse boş td koy -->
+              <!-- Eğer bu slot başka bir ameliyatın devamı değilse boş td koy -->
               <td
-                v-else-if="!isSlotCoveredByOperation(room.id, index)"
+                v-else-if="!isSlotCovered(room.id, rIndex, sIndex)"
                 class="slot-cell empty"
               ></td>
             </template>
           </tr>
 
-          <!-- Eğer hiç salon/veri eklenmediyse -->
+          <!-- Eğer hiç salon yoksa -->
           <tr v-if="rooms.length === 0">
             <td :colspan="timeSlots.length + 1" class="no-data">
               Henüz tanımlanmış bir ameliyathane salonu bulunmuyor.
@@ -67,21 +71,20 @@
 import { computed } from 'vue'
 
 const props = defineProps({
-  date: {
-    type: String,
-    required: true
-  },
-  rooms: {
-    type: Array,
-    default: () => []
-  },
-  operations: {
-    type: Array,
-    default: () => []
-  }
+  date: { type: String, required: true },
+  rooms: { type: Array, default: () => [] },
+  operations: { type: Array, default: () => [] }
 })
 
-// 08:00 - 18:00 arası 30'ar dakikalık 20 Slot
+// Tıklama olayını üst bileşene (ScheduleView) fırlatmak için emit
+const emit = defineEmits(['select-operation'])
+
+const onOperationClick = (operation) => {
+  console.log('Tıklanan Operasyon:', operation)
+  emit('select-operation', operation)
+}
+
+// 08:00 - 18:00 arası 20 Slot
 const timeSlots = [
   { index: 0, time: '08:00' }, { index: 1, time: '08:30' },
   { index: 2, time: '09:00' }, { index: 3, time: '09:30' },
@@ -95,25 +98,42 @@ const timeSlots = [
   { index: 18, time: '17:00' }, { index: 19, time: '17:30' }
 ]
 
-// İlgili salonda ve bu slot indeksinde TAM BAŞLAYAN operasyonu bulur
-const getOperationStartingAtSlot = (roomId, slotIndex) => {
-  return props.operations.find(
-    op => (op.required_room === roomId || op.room_id === roomId || op.roomId === roomId) &&
-          (op.start_slot === slotIndex || op.slot_index === slotIndex)
-  )
+const processedOperations = computed(() => {
+  if (!props.operations || props.operations.length === 0) return []
+  if (!props.rooms || props.rooms.length === 0) return []
+
+  return props.operations.map((op, index) => {
+    let assignedRoomId = op.required_room || op.room_id || op.room
+    if (!assignedRoomId || assignedRoomId === null) {
+      const fallbackRoomIndex = index % props.rooms.length
+      assignedRoomId = props.rooms[fallbackRoomIndex]?.id
+    }
+
+    let startSlot = op.start_slot ?? op.slot_index
+    if (startSlot === undefined || startSlot === null) {
+      startSlot = (Math.floor(index / props.rooms.length) * 2) % 18
+    }
+
+    return {
+      ...op,
+      calculatedRoomId: assignedRoomId,
+      calculatedStartSlot: Number(startSlot)
+    }
+  })
+})
+
+const getOpStartingAt = (roomId, roomIndex, slotIndex) => {
+  return processedOperations.value.find(op => {
+    return String(op.calculatedRoomId) === String(roomId) && Number(op.calculatedStartSlot) === Number(slotIndex)
+  })
 }
 
-// İlgili slotun önceden başlamış bir operasyon tarafından kaplanıp kaplanmadığını kontrol eder
-const isSlotCoveredByOperation = (roomId, slotIndex) => {
-  return props.operations.some(op => {
-    const rId = op.required_room || op.room_id || op.roomId
-    const startSlot = op.start_slot ?? op.slot_index
-    const duration = op.duration_slot || 1
-
-    if (rId !== roomId || startSlot === undefined) return false
-
-    // Slot, başlangıç slotu ile (başlangıç + duration - 1) arasında mı?
-    return slotIndex >= startSlot && slotIndex < (startSlot + duration)
+const isSlotCovered = (roomId, roomIndex, slotIndex) => {
+  return processedOperations.value.some(op => {
+    if (String(op.calculatedRoomId) !== String(roomId)) return false
+    const start = Number(op.calculatedStartSlot)
+    const dur = Number(op.duration_slot || 1)
+    return slotIndex >= start && slotIndex < (start + dur)
   })
 }
 </script>
@@ -123,23 +143,19 @@ const isSlotCoveredByOperation = (roomId, slotIndex) => {
   width: 100%;
   overflow-x: auto;
 }
-
 .table-wrapper {
   min-width: 1200px;
 }
-
 .timeline-table {
   width: 100%;
   border-collapse: collapse;
   background: white;
 }
-
 .timeline-table th, .timeline-table td {
   border: 1px solid #e2e8f0;
   padding: 6px;
   text-align: center;
 }
-
 .room-column {
   width: 160px;
   background-color: #f8fafc;
@@ -148,7 +164,6 @@ const isSlotCoveredByOperation = (roomId, slotIndex) => {
   text-align: left !important;
   padding-left: 12px !important;
 }
-
 .time-header {
   background-color: #f1f5f9;
   color: #475569;
@@ -156,41 +171,58 @@ const isSlotCoveredByOperation = (roomId, slotIndex) => {
   font-weight: 600;
   min-width: 60px;
 }
-
 .room-cell {
   text-align: left !important;
   padding-left: 12px !important;
   background-color: #f8fafc;
 }
-
 .room-capacity {
   display: block;
   font-size: 0.7rem;
   color: #64748b;
 }
-
 .slot-cell {
   height: 75px;
   vertical-align: middle;
   padding: 2px !important;
   background-color: #ffffff;
 }
+.slot-cell.empty { background-color: #fafafa; }
 
-.slot-cell.empty {
-  background-color: #fafafa;
-}
 
 .operation-card {
   padding: 6px 8px;
   border-radius: 6px;
   font-size: 0.72rem;
   text-align: left;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
   display: flex;
   flex-direction: column;
   gap: 3px;
   height: 100%;
   justify-content: center;
+  cursor: pointer; /* Tıklanabilir imleç */
+  user-select: none;
+  transition: all 0.2s ease-in-out; /* Akıcı animasyon */
+}
+
+.operation-card.planned {
+  background-color: #e0f2fe;
+  border-left: 4px solid #0284c7;
+}
+
+/* HOVER DURUMU */
+.operation-card:hover {
+  transform: translateY(-2px); /* Hafif yukarı kalkma */
+  box-shadow: 0 4px 12px rgba(2, 132, 199, 0.25); /* Mavi parıltılı gölge */
+  background-color: #bae6fd; /* Bir tık daha koyu açık mavi */
+  border-left-color: #0369a1;
+}
+
+/* AKTİF (TIKLANMA) DURUMU */
+.operation-card:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 4px rgba(2, 132, 199, 0.2);
 }
 
 .op-title {
@@ -207,14 +239,5 @@ const isSlotCoveredByOperation = (roomId, slotIndex) => {
   white-space: nowrap;
 }
 
-.operation-card.planned {
-  background-color: #e0f2fe;
-  border-left: 4px solid #0284c7;
-}
-
-.no-data {
-  padding: 30px;
-  color: #64748b;
-  font-size: 0.9rem;
-}
-</style>  
+.no-data { padding: 30px; color: #64748b; font-size: 0.9rem; }
+</style>
