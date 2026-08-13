@@ -12,44 +12,55 @@
         </thead>
         <tbody>
           <!-- Salonlar Listesi -->
-          <tr v-for="(room, rIndex) in rooms" :key="room.id">
+          <tr v-for="room in rooms" :key="room.id">
             <td class="room-cell">
-              <strong>{{ room.name }}</strong>
+              <strong>{{ room.name || `OR-${room.id}` }}</strong>
               <span v-if="room.specialty_type" class="room-capacity">{{ room.specialty_type }}</span>
             </td>
 
             <!-- 30 Dakikalık Slot Hücreleri -->
-            <template v-for="(slot, sIndex) in timeSlots" :key="slot.time">
-              <!-- Eğer bu slotta yeni başlayan bir ameliyat varsa render et -->
+            <template v-for="slot in timeSlots" :key="slot.time">
+              <!-- 1. Eğer bu slotta YENİ BAŞLAYAN bir ameliyat varsa -->
               <td
-                v-if="getOpStartingAt(room.id, rIndex, sIndex)"
-                :colspan="getOpStartingAt(room.id, rIndex, sIndex).duration_slot || 1"
+                v-if="getOpStartingAt(room.id, slot.index)"
+                :colspan="getOpStartingAt(room.id, slot.index).duration_slot || 1"
                 class="slot-cell occupied"
               >
                 <div
-                  class="operation-card planned"
-                  @click="onOperationClick(getOpStartingAt(room.id, rIndex, sIndex))"
-                  :title="`${getOpStartingAt(room.id, rIndex, sIndex).patient_name || 'Hasta'} - Detaylar için tıklayın`"
+                  class="operation-card"
+                  :class="getPriorityClass(getOpStartingAt(room.id, slot.index).priority)"
+                  @click="onOperationClick(getOpStartingAt(room.id, slot.index))"
+                  :title="`${getOpStartingAt(room.id, slot.index).patient_name || 'Hasta'} - Detaylar için tıklayın`"
                 >
-                  <div class="op-title">
-                    {{ getOpStartingAt(room.id, rIndex, sIndex).patient_name || 'Hasta' }} -
-                    {{ getOpStartingAt(room.id, rIndex, sIndex).operation_name || 'Ameliyat' }}
+                  <div class="op-header">
+                    <span class="op-title">
+                      {{ getOpStartingAt(room.id, slot.index).patient_name || 'Hasta' }} -
+                      {{ getOpStartingAt(room.id, slot.index).operation_name || 'Ameliyat' }}
+                    </span>
+                    <!-- Öncelik Rozeti -->
+                    <span
+                      v-if="getOpStartingAt(room.id, slot.index).priority"
+                      class="priority-badge"
+                    >
+                      {{ getOpStartingAt(room.id, slot.index).priority }}
+                    </span>
                   </div>
-                  <div class="op-surgeon" v-if="getOpStartingAt(room.id, rIndex, sIndex).surgeon">
-                    👨‍⚕️ {{ getOpStartingAt(room.id, rIndex, sIndex).surgeon }}
+
+                  <div class="op-surgeon" v-if="getOpStartingAt(room.id, slot.index).surgeonDisplay">
+                    👨‍⚕️ {{ getOpStartingAt(room.id, slot.index).surgeonDisplay }}
                   </div>
-                  <div class="op-anesthesia" v-if="getOpStartingAt(room.id, rIndex, sIndex).anesthesia">
-                    💉 {{ getOpStartingAt(room.id, rIndex, sIndex).anesthesia }}
+                  <div class="op-anesthesia" v-if="getOpStartingAt(room.id, slot.index).anesthesiaDisplay">
+                    💉 {{ getOpStartingAt(room.id, slot.index).anesthesiaDisplay }}
                   </div>
                   <div class="op-duration">
-                    ⏱️ {{ (getOpStartingAt(room.id, rIndex, sIndex).duration_slot || 1) * 30 }} dk
+                    ⏱️ {{ (getOpStartingAt(room.id, slot.index).duration_slot || 1) * 30 }} dk
                   </div>
                 </div>
               </td>
 
-              <!-- Eğer bu slot başka bir ameliyatın devamı değilse boş td koy -->
+              <!-- 2. Eğer bu slot bir ameliyatın devamı DEĞİLSE boş td koy -->
               <td
-                v-else-if="!isSlotCovered(room.id, rIndex, sIndex)"
+                v-else-if="!isSlotCoveredByPreviousOp(room.id, slot.index)"
                 class="slot-cell empty"
               ></td>
             </template>
@@ -73,14 +84,14 @@ import { computed } from 'vue'
 const props = defineProps({
   date: { type: String, required: true },
   rooms: { type: Array, default: () => [] },
-  operations: { type: Array, default: () => [] }
+  operations: { type: Array, default: () => [] },
+  surgeons: { type: Array, default: () => [] },
+  anesthesiaTeams: { type: Array, default: () => [] }
 })
 
-// Tıklama olayını üst bileşene (ScheduleView) fırlatmak için emit
 const emit = defineEmits(['select-operation'])
 
 const onOperationClick = (operation) => {
-  console.log('Tıklanan Operasyon:', operation)
   emit('select-operation', operation)
 }
 
@@ -98,43 +109,77 @@ const timeSlots = [
   { index: 18, time: '17:00' }, { index: 19, time: '17:30' }
 ]
 
+// Operasyonları Salon ve Slot Bilgilerine Göre İşleme
 const processedOperations = computed(() => {
   if (!props.operations || props.operations.length === 0) return []
-  if (!props.rooms || props.rooms.length === 0) return []
 
-  return props.operations.map((op, index) => {
-    let assignedRoomId = op.required_room || op.room_id || op.room
-    if (!assignedRoomId || assignedRoomId === null) {
-      const fallbackRoomIndex = index % props.rooms.length
-      assignedRoomId = props.rooms[fallbackRoomIndex]?.id
-    }
+  return props.operations
+    .filter(op => {
+      // Room kontrolü (Obje veya ID)
+      const roomId = op.room_id ?? op.required_room ?? (typeof op.room === 'object' ? op.room?.id : op.room)
+      const startSlot = op.start_slot ?? op.calculatedStartSlot
 
-    let startSlot = op.start_slot ?? op.slot_index
-    if (startSlot === undefined || startSlot === null) {
-      startSlot = (Math.floor(index / props.rooms.length) * 2) % 18
-    }
+      return roomId !== undefined && roomId !== null && startSlot !== undefined && startSlot !== null
+    })
+    .map((op) => {
+      let assignedRoomId = op.room_id ?? op.required_room ?? (typeof op.room === 'object' ? op.room?.id : op.room)
+      const startSlot = op.start_slot ?? op.calculatedStartSlot
 
-    return {
-      ...op,
-      calculatedRoomId: assignedRoomId,
-      calculatedStartSlot: Number(startSlot)
-    }
-  })
+      // Cerrah İsmi Çözümleme
+      let sDisplay = op.surgeon_name || op.doctor_name
+      if (!sDisplay && op.surgeon) {
+        if (typeof op.surgeon === 'object') sDisplay = op.surgeon.name || op.surgeon.full_name
+        else if (props.surgeons && props.surgeons.length > 0) {
+          const match = props.surgeons.find(s => String(s.id) === String(op.surgeon))
+          if (match) sDisplay = match.name || match.full_name
+        }
+      }
+
+      // Anestezi İsmi Çözümleme
+      let aDisplay = op.anesthesia_name || op.anesthesia_team_name
+      if (!aDisplay && op.anesthesia) {
+        if (typeof op.anesthesia === 'object') aDisplay = op.anesthesia.name || op.anesthesia.team_name
+        else if (props.anesthesiaTeams && props.anesthesiaTeams.length > 0) {
+          const match = props.anesthesiaTeams.find(a => String(a.id) === String(op.anesthesia))
+          if (match) aDisplay = match.name || match.team_name
+        }
+      }
+
+      return {
+        ...op,
+        calculatedRoomId: String(assignedRoomId),
+        calculatedStartSlot: Number(startSlot),
+        surgeonDisplay: sDisplay,
+        anesthesiaDisplay: aDisplay
+      }
+    })
 })
 
-const getOpStartingAt = (roomId, roomIndex, slotIndex) => {
+// Tam olarak bu slotta Başlayan ameliyatı getirir
+const getOpStartingAt = (roomId, slotIndex) => {
   return processedOperations.value.find(op => {
-    return String(op.calculatedRoomId) === String(roomId) && Number(op.calculatedStartSlot) === Number(slotIndex)
+    return op.calculatedRoomId === String(roomId) && op.calculatedStartSlot === Number(slotIndex)
   })
 }
 
-const isSlotCovered = (roomId, roomIndex, slotIndex) => {
+// Bir önceki ameliyatın kapsadığı (colspan ile uzayan) slotları tespit eder
+const isSlotCoveredByPreviousOp = (roomId, slotIndex) => {
   return processedOperations.value.some(op => {
-    if (String(op.calculatedRoomId) !== String(roomId)) return false
-    const start = Number(op.calculatedStartSlot)
+    if (op.calculatedRoomId !== String(roomId)) return false
+    const start = op.calculatedStartSlot
     const dur = Number(op.duration_slot || 1)
-    return slotIndex >= start && slotIndex < (start + dur)
+
+    // Slot başlangıç noktasından SONRAKİ kapsanan aralıktaysa
+    return slotIndex > start && slotIndex < (start + dur)
   })
+}
+
+const getPriorityClass = (priority) => {
+  const p = String(priority || '').toUpperCase()
+  if (p === 'KRITIK' || p === 'CRITICAL') return 'priority-critical'
+  if (p === 'YÜKSEK' || p === 'HIGH') return 'priority-high'
+  if (p === 'DÜŞÜK' || p === 'LOW') return 'priority-low'
+  return 'priority-normal'
 }
 </script>
 
@@ -189,7 +234,6 @@ const isSlotCovered = (roomId, roomIndex, slotIndex) => {
 }
 .slot-cell.empty { background-color: #fafafa; }
 
-
 .operation-card {
   padding: 6px 8px;
   border-radius: 6px;
@@ -201,36 +245,55 @@ const isSlotCovered = (roomId, roomIndex, slotIndex) => {
   gap: 3px;
   height: 100%;
   justify-content: center;
-  cursor: pointer; /* Tıklanabilir imleç */
+  cursor: pointer;
   user-select: none;
-  transition: all 0.2s ease-in-out; /* Akıcı animasyon */
+  transition: all 0.2s ease-in-out;
 }
 
-.operation-card.planned {
+.operation-card.priority-critical {
+  background-color: #fef2f2;
+  border-left: 4px solid #ef4444;
+}
+.operation-card.priority-high {
+  background-color: #fff7ed;
+  border-left: 4px solid #f97316;
+}
+.operation-card.priority-normal {
   background-color: #e0f2fe;
   border-left: 4px solid #0284c7;
 }
-
-/* HOVER DURUMU */
-.operation-card:hover {
-  transform: translateY(-2px); /* Hafif yukarı kalkma */
-  box-shadow: 0 4px 12px rgba(2, 132, 199, 0.25); /* Mavi parıltılı gölge */
-  background-color: #bae6fd; /* Bir tık daha koyu açık mavi */
-  border-left-color: #0369a1;
+.operation-card.priority-low {
+  background-color: #f0fdf4;
+  border-left: 4px solid #22c55e;
 }
 
-/* AKTİF (TIKLANMA) DURUMU */
-.operation-card:active {
-  transform: translateY(0);
-  box-shadow: 0 2px 4px rgba(2, 132, 199, 0.2);
+.operation-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  filter: brightness(0.97);
+}
+
+.op-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .op-title {
   font-weight: 700;
-  color: #0369a1;
+  color: #1e293b;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.priority-badge {
+  font-size: 0.6rem;
+  font-weight: 800;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(0,0,0,0.06);
+  text-transform: uppercase;
 }
 
 .op-surgeon, .op-anesthesia, .op-duration {

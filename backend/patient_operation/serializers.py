@@ -3,9 +3,9 @@ from base.serializers import BaseModelSerializer
 from rest_framework import serializers
 
 class PatientOperationSerializer(BaseModelSerializer):
-    surgeon_name = serializers.ReadOnlyField(source='surgeon.name')
-    anesthesia_name = serializers.ReadOnlyField(source='anesthesia.name')
-    required_room_name = serializers.ReadOnlyField(source='required_room.name')
+    surgeon_name = serializers.SerializerMethodField()
+    anesthesia_name = serializers.SerializerMethodField()
+    required_room_name =  serializers.SerializerMethodField()
 
     class Meta:
         model=PatientOperation

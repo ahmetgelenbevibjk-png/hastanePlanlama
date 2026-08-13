@@ -19,19 +19,19 @@
           <span class="value">{{ operation.operation_name || 'Belirtilmedi' }}</span>
         </div>
 
-        <!-- Cerrah / Doktor (Null gelse de görünür) -->
+        <!-- Atanan Cerrah -->
         <div class="detail-row">
           <span class="label">Atanan Cerrah:</span>
-          <span class="value" :class="{ 'not-assigned': !getSurgeonName(operation) }">
-            👨‍⚕️ {{ getSurgeonName(operation) || 'Atanmadı' }}
+          <span class="value" :class="{ 'not-assigned': !surgeonDisplay }">
+            👨‍⚕️ {{ surgeonDisplay || 'Atanmadı' }}
           </span>
         </div>
 
-        <!-- Anestezi Ekibi (Null gelse de görünür) -->
+        <!-- Anestezi Ekibi -->
         <div class="detail-row">
           <span class="label">Anestezi Ekibi:</span>
-          <span class="value" :class="{ 'not-assigned': !getAnesthesiaName(operation) }">
-            💉 {{ getAnesthesiaName(operation) || 'Atanmadı' }}
+          <span class="value" :class="{ 'not-assigned': !anesthesiaDisplay }">
+            💉 {{ anesthesiaDisplay || 'Atanmadı' }}
           </span>
         </div>
 
@@ -55,10 +55,10 @@
           <span class="value">⏱️ {{ (operation.duration_slot || 1) * 30 }} dakika</span>
         </div>
 
-        <!-- Atanan Salon (OR-1, OR-2 Akıllı Eşleşme) -->
+        <!-- Atanan Salon -->
         <div class="detail-row">
           <span class="label">Atanan Salon:</span>
-          <span class="value highlight-room">{{ resolvedRoomName }}</span>
+          <span class="value highlight-room">{{ roomDisplay }}</span>
         </div>
       </div>
 
@@ -84,15 +84,6 @@ const props = defineProps({
   rooms: {
     type: Array,
     default: () => []
-  },
-  // İleride doktor ve anestezi listesini geçmek istersen hazır olsun:
-  surgeons: {
-    type: Array,
-    default: () => []
-  },
-  anesthesiaTeams: {
-    type: Array,
-    default: () => []
   }
 })
 
@@ -102,72 +93,59 @@ const close = () => {
   emit('close')
 }
 
-// Cerrah ID / Obje / Isım Formatlayıcı
-const getSurgeonName = (op) => {
-  if (!op) return null
-  const val = op.surgeon || op.surgeon_name || op.doctor || op.doctor_name || op.assigned_surgeon
-  if (!val || val === 'null') return null
+// Cerrah İsmi Mantığı
+const surgeonDisplay = computed(() => {
+  if (!props.operation) return null
+  const op = props.operation
 
-  // 1. Eğer Obje olarak geldiyse (örn: { id: 7, name: "Dr. Ahmet" })
-  if (typeof val === 'object') {
-    return val.name || val.full_name || val.username || `Dr. #${val.id}`
+  // 1. Backend'den metin olarak gelen isim
+  if (op.surgeon_name) return op.surgeon_name
+  if (op.doctor_name) return op.doctor_name
+
+  // 2. Obje olarak gelen cerrah verisi
+  if (op.surgeon && typeof op.surgeon === 'object') {
+    return op.surgeon.name || op.surgeon.full_name || op.surgeon.username
   }
 
-  // 2. Eğer surgeons dizisi props olarak geldiyse ID ile eşleştir
-  if (props.surgeons && props.surgeons.length > 0) {
-    const found = props.surgeons.find(s => String(s.id) === String(val))
-    if (found) return found.name || found.full_name
+  // 3. Doğrudan metin geldiyse
+  if (typeof op.surgeon === 'string' && isNaN(op.surgeon)) {
+    return op.surgeon
   }
 
-  // 3. Eğer sadece sayısal ID geldiyse (örn: 7)
-  if (!isNaN(val)) {
-    return `Dr. #${val}`
+  return null
+})
+
+// Anestezi İsmi Mantığı
+const anesthesiaDisplay = computed(() => {
+  if (!props.operation) return null
+  const op = props.operation
+
+  if (op.anesthesia_name) return op.anesthesia_name
+
+  if (op.anesthesia && typeof op.anesthesia === 'object') {
+    return op.anesthesia.name || op.anesthesia.team_name
   }
 
-  return val
-}
-
-// Anestezi ID / Obje / Isım Formatlayıcı
-const getAnesthesiaName = (op) => {
-  if (!op) return null
-  const val = op.anesthesia || op.anesthesia_team || op.anesthesiologist || op.anesthesia_name
-  if (!val || val === 'null') return null
-
-  // 1. Eğer Obje olarak geldiyse
-  if (typeof val === 'object') {
-    return val.name || val.full_name || val.team_name || `Anestezi Ekibi #${val.id}`
+  if (typeof op.anesthesia === 'string' && isNaN(op.anesthesia)) {
+    return op.anesthesia
   }
 
-  // 2. Eğer anesthesiaTeams dizisi props olarak geldiyse ID ile eşleştir
-  if (props.anesthesiaTeams && props.anesthesiaTeams.length > 0) {
-    const found = props.anesthesiaTeams.find(a => String(a.id) === String(val))
-    if (found) return found.name || found.team_name
-  }
+  return null
+})
 
-  // 3. Eğer sadece sayısal ID geldiyse (örn: 6)
-  if (!isNaN(val)) {
-    return `Anestezi Ekibi #${val}`
-  }
-
-  return val
-}
-
-// Salon İsmi Eşleştirme
-const resolvedRoomName = computed(() => {
+// Salon İsmi Mantığı
+const roomDisplay = computed(() => {
   if (!props.operation) return 'Atanmadı'
   const op = props.operation
 
-  if (op.room && typeof op.room === 'object') return op.room.name || op.room.room_name
   if (op.room_name) return op.room_name
+  if (op.room && typeof op.room === 'object') return op.room.name || op.room.room_name
 
   const targetRoomId = op.calculatedRoomId || op.required_room || op.room_id || op.room
 
   if (props.rooms && props.rooms.length > 0 && targetRoomId) {
     const foundRoom = props.rooms.find(r => String(r.id) === String(targetRoomId))
     if (foundRoom) return foundRoom.name || foundRoom.room_name
-
-    const indexBasedRoom = props.rooms.find((r, idx) => idx === (Number(targetRoomId) % props.rooms.length))
-    if (indexBasedRoom) return indexBasedRoom.name || indexBasedRoom.room_name
   }
 
   return targetRoomId ? `OR-${targetRoomId}` : 'Atanmadı'

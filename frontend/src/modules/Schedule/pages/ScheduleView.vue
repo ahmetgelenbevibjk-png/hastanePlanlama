@@ -15,7 +15,6 @@
             type="date"
             id="schedule-date"
             v-model="selectedDate"
-            @change="fetchScheduleData"
             class="date-input"
           />
         </div>
@@ -41,7 +40,7 @@
       </div>
       <div class="stat-card">
         <span class="stat-label">Planlanan Operasyon</span>
-        <span class="stat-value">{{ operations.length }}</span>
+        <span class="stat-value">{{ scheduledOperations.length }}</span>
       </div>
       <div class="stat-card">
         <span class="stat-label">Ortalama Doluluk</span>
@@ -56,16 +55,20 @@
         v-else
         :date="selectedDate"
         :rooms="rooms"
-        :operations="operations"
+        :operations="scheduledOperations"
+        :surgeons="surgeons"
+        :anesthesia-teams="anesthesiaTeams"
         @select-operation="handleSelectOperation"
       />
     </div>
 
-    <!-- Ameliyat Detay Modalı (Tek ve :rooms prop'lu) -->
+    <!-- Ameliyat Detay Modalı -->
     <OperationDetailModal
       :is-open="isModalOpen"
       :operation="selectedOp"
       :rooms="rooms"
+      :surgeons="surgeons"
+      :anesthesia-teams="anesthesiaTeams"
       @close="closeModal"
     />
   </div>
@@ -74,11 +77,9 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import ScheduleGrid from '../components/ScheduleGrid.vue'
-// pages klasöründeki konumu:
 import OperationDetailModal from '../pages/OperationDetailModal.vue'
 import { ScheduleService } from '../services.js'
 
-// Bugünün tarihini YYYY-MM-DD olarak al
 const getTodayString = () => {
   const d = new Date()
   const year = d.getFullYear()
@@ -92,29 +93,28 @@ const isOptimizing = ref(false)
 const loading = ref(false)
 
 const rooms = ref([])
-const operations = ref([])
+const operations = ref([])          // Tüm operasyonlar veya ham liste
+const scheduledOperations = ref([]) // Sadece çizelgeye çizilecek atanmış ameliyatlar
+const surgeons = ref([])
+const anesthesiaTeams = ref([])
 
-// Modal State'leri
 const isModalOpen = ref(false)
 const selectedOp = ref(null)
 
-// Modal Açma
 const handleSelectOperation = (op) => {
   selectedOp.value = op
   isModalOpen.value = true
 }
 
-// Modal Kapatma
 const closeModal = () => {
   isModalOpen.value = false
   selectedOp.value = null
 }
 
-// Doluluk Oranı
 const occupancyRate = computed(() => {
   if (rooms.value.length === 0) return 0
   const totalAvailableSlots = rooms.value.length * 20
-  const totalScheduledSlots = operations.value.reduce((total, op) => {
+  const totalScheduledSlots = scheduledOperations.value.reduce((total, op) => {
     const slots = op.duration_slot || Math.ceil((op.duration || 60) / 30)
     return total + slots
   }, 0)
@@ -131,8 +131,21 @@ const fetchScheduleData = async () => {
 
     const opRes = await ScheduleService.getOperations()
     const allOps = Array.isArray(opRes.data) ? opRes.data : (opRes.data?.results || [])
-
     operations.value = allOps
+
+    // Veritabanında zaten bir salona/slota atanmış olanlar varsa çizelgeye ver
+    scheduledOperations.value = allOps.filter(op =>
+      (op.room_id || op.room) && (op.start_slot !== null && op.start_slot !== undefined)
+    )
+
+    if (ScheduleService.getSurgeons) {
+      const surgeonRes = await ScheduleService.getSurgeons()
+      surgeons.value = Array.isArray(surgeonRes.data) ? surgeonRes.data : (surgeonRes.data?.results || [])
+    }
+    if (ScheduleService.getAnesthesiaTeams) {
+      const anesthesiaRes = await ScheduleService.getAnesthesiaTeams()
+      anesthesiaTeams.value = Array.isArray(anesthesiaRes.data) ? anesthesiaRes.data : (anesthesiaRes.data?.results || [])
+    }
   } catch (error) {
     console.error('Çizelge verileri yüklenirken hata:', error)
   } finally {
@@ -147,17 +160,30 @@ const runOptimizer = async () => {
   }
 
   isOptimizing.value = true
+
   try {
-    const response = await ScheduleService.runScheduler(selectedDate.value)
-    const scheduledCount = response.data?.scheduled_count ?? response.data?.count ?? 0
-    const message = response.data?.message || `${scheduledCount} adet ameliyat başarıyla çizelgelendi ve kaydedildi.`
+    // JavaScript varsayılan UTC kaymasını engellemek için tarihi doğrudan parçalıyoruz
+    const [year, month, day] = selectedDate.value.split('-').map(Number)
+    const dateObj = new Date(year, month - 1, day)
 
-    alert(message)
+    // Türkçe gün ismini alıyoruz (Örn: "Perşembe")
+    const dayName = dateObj.toLocaleDateString('tr-TR', { weekday: 'long' })
 
-    if (response.data?.operations && Array.isArray(response.data.operations)) {
-      operations.value = response.data.operations
-    } else {
-      await fetchScheduleData()
+    const response = await ScheduleService.runScheduler({
+      date: selectedDate.value,
+      day_name: dayName
+    })
+
+    if (response.data && response.data.assigned) {
+      // Backend'den dönen 'assigned' dizisini reaktif değişkene bağlayalım
+      scheduledOperations.value = response.data.assigned
+
+      const assignedCount = response.data.assigned_count || scheduledOperations.value.length
+      const unassignedCount = response.data.unassigned_count || 0
+
+      console.log("Atanan Ameliyatlar:", scheduledOperations.value)
+
+      alert(`Optimizasyon tamamlandı!\n- Atanan Operasyon: ${assignedCount}\n- Atanamayan Operasyon: ${unassignedCount}`)
     }
   } catch (error) {
     console.error('Planlama hatası:', error)
@@ -250,7 +276,9 @@ onMounted(() => {
 }
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;}
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
 .stat-card {
   background: #ffffff;
   padding: 16px 20px;

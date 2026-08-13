@@ -12,6 +12,17 @@ class PatientOperation(BaseModel):
         MEDIUM = 'MEDIUM', 'Orta'
         LOW = 'LOW', 'Düşük'
 
+    start_slot = models.IntegerField(null=True, blank=True)
+
+    # Çakışmayı önlemek için related_name eklendi
+    room = models.ForeignKey(
+        'room.OperatingRoom',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='assigned_operations'
+    )
+
     patient_name = models.CharField(max_length=100, verbose_name="Hasta Adı/Kodu")
     operation_name = models.CharField(max_length=100, verbose_name="Operasyon Adı")
     required_specialty = models.CharField(max_length=100, verbose_name="Gereken Uzmanlık")
@@ -32,12 +43,13 @@ class PatientOperation(BaseModel):
         verbose_name="Planlandı mı?"
     )
 
-    # İlişkisel Alanlar (Foreign Keys)
+    # İlişkisel Alanlar (Foreign Keys) - Çakışmayı önlemek için related_name eklendi
     required_room = models.ForeignKey(
         OperatingRoom,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
+        related_name='required_operations',
         verbose_name="Zorunlu Ameliyathane"
     )
     surgeon = models.ForeignKey(

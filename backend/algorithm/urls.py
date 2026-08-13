@@ -1,6 +1,6 @@
 from django.urls import path
-from .views import RunOptimizationAPIView
+from .views import ScheduleOptimizeView
 
 urlpatterns = [
-    path('run/', RunOptimizationAPIView.as_view(), name='run-optimization'),
+    path('run/', ScheduleOptimizeView.as_view(), name='algorithm-run'),
 ]

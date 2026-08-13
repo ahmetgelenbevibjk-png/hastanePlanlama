@@ -1,191 +1,145 @@
-from datetime import datetime
-from room.models import OperatingRoom
-from surgeon.models import Surgeon
-from anesthesia.models import AnesthesiaTeam
-from patient_operation.models import PatientOperation
-from .constraints import ScheduleConstraints
-from django.db import transaction
+from .constraints import can_assign_operation
 
 
 class ScheduleOptimizer:
-    TOTAL_SLOTS = 20
 
-    def __init__(self, target_date_str):
-        self.target_date_str = target_date_str
-        self.date_obj = datetime.strptime(target_date_str, "%Y-%m-%d")
-        self.day_name = self.date_obj.strftime("%A").lower()
+    PRIORITY_WEIGHTS = {
+        'KRITIK': 4,
+        'CRITICAL': 4,
+        'YÜKSEK': 3,
+        'HIGH': 3,
+        'NORMAL': 2,
+        'MEDIUM': 2,
+        'DÜŞÜK': 1,
+        'LOW': 1,
+    }
 
-        self.rooms = []
-        self.surgeons = []
-        self.anesthesia_teams = []
-        self.operations = []
+    def __init__(self, total_slots=20):
+        self.total_slots = total_slots
 
-        self.room_timelines = {}
-        self.surgeon_timelines = {}
-        self.anesthesia_timelines = {}
+    def sort_operations_by_priority(self, operations):
+        return sorted(
+            operations,
+            key=lambda op: self.PRIORITY_WEIGHTS.get(str(getattr(op, 'priority', '')).upper(), 0),
+            reverse=True
+        )
 
-    def load_data(self):
-        self.rooms = list(OperatingRoom.objects.filter(is_active=True))
-        self.surgeons = list(Surgeon.objects.filter(is_active=True))
-        self.anesthesia_teams = list(AnesthesiaTeam.objects.filter(is_active=True))
+    def initialize_schedules(self, rooms, surgeons, anesthesias, pre_assigned_operations=None):
+        room_schedule = {r.id if hasattr(r, 'id') else r: [None] * self.total_slots for r in rooms}
+        surgeon_schedule = {s.id if hasattr(s, 'id') else s: [None] * self.total_slots for s in surgeons}
+        anesthesia_schedule = {a.id if hasattr(a, 'id') else a: [None] * self.total_slots for a in anesthesias}
 
-        priority_order = {'EMERGENCY': 0, 'CRITICAL': 1, 'HIGH': 2, 'MEDIUM': 3, 'LOW': 4}
-        all_ops = list(PatientOperation.objects.filter(is_active=True, is_scheduled=False))
-        self.operations = sorted(all_ops, key=lambda x: priority_order.get(x.priority, 5))
+        if pre_assigned_operations:
+            for op in pre_assigned_operations:
+                r_id = getattr(op, 'room_id', None) or getattr(getattr(op, 'room', None), 'id', None)
+                s_id = getattr(op, 'surgeon_id', None) or getattr(getattr(op, 'surgeon', None), 'id', None)
+                a_id = getattr(op, 'anesthesia_id', None) or getattr(getattr(op, 'anesthesia', None), 'id', None)
+                start_slot = getattr(op, 'start_slot', None)
+                duration = getattr(op, 'duration_slot', 1)
+                op_id = getattr(op, 'id', op)
 
-        for room in self.rooms:
-            self.room_timelines[room.id] = [None] * self.TOTAL_SLOTS
+                if r_id and start_slot is not None:
+                    for offset in range(duration):
+                        curr_slot = start_slot + offset
+                        if curr_slot < self.total_slots:
+                            if r_id in room_schedule:
+                                room_schedule[r_id][curr_slot] = op_id
+                            if s_id and s_id in surgeon_schedule:
+                                surgeon_schedule[s_id][curr_slot] = op_id
+                            if a_id and a_id in anesthesia_schedule:
+                                anesthesia_schedule[a_id][curr_slot] = op_id
 
-        for surgeon in self.surgeons:
-            self.surgeon_timelines[surgeon.id] = [None] * self.TOTAL_SLOTS
+        return room_schedule, surgeon_schedule, anesthesia_schedule
 
-        for team in self.anesthesia_teams:
-            self.anesthesia_timelines[team.id] = [None] * self.TOTAL_SLOTS
+    def find_best_slot_for_operation(self, operation, rooms, surgeons, anesthesias,
+                                     day_name, room_schedule, surgeon_schedule, anesthesia_schedule):
+        for slot in range(self.total_slots):
+            for room in rooms:
+                for surgeon in surgeons:
+                    for anesthesia in anesthesias:
+                        if can_assign_operation(
+                            operation=operation,
+                            surgeon=surgeon,
+                            room=room,
+                            anesthesia=anesthesia,
+                            start_slot=slot,
+                            day_name=day_name,
+                            room_schedule=room_schedule,
+                            surgeon_schedule=surgeon_schedule,
+                            anesthesia_schedule=anesthesia_schedule,
+                            total_slots=self.total_slots
+                        ):
+                            return slot, room, surgeon, anesthesia
 
-    def optimize(self):
-        self.load_data()
+        return None, None, None, None
 
-        scheduled_count = 0
-        unscheduled_count = 0
+    def assign_operation_to_schedule(self, operation, slot, room, surgeon, anesthesia,
+                                     room_schedule, surgeon_schedule, anesthesia_schedule):
+        duration = getattr(operation, 'duration_slot', 1)
 
-        for op in self.operations:
-            assignment = self._find_best_assignment(op)
+        room_id = room.id if hasattr(room, 'id') else room
+        surgeon_id = surgeon.id if hasattr(surgeon, 'id') else surgeon
+        anesthesia_id = anesthesia.id if hasattr(anesthesia, 'id') else anesthesia
+        op_id = operation.id if hasattr(operation, 'id') else operation
 
-            if assignment:
-                room_id = assignment['room_id']
-                surgeon_id = assignment['surgeon_id']
-                team_id = assignment['team_id']
-                start_slot = assignment['start_slot']
-                duration = getattr(op, 'duration_slot', None) or getattr(op, 'duration', 2)
+        if room_id not in room_schedule:
+            room_schedule[room_id] = [None] * self.total_slots
+        if surgeon_id not in surgeon_schedule:
+            surgeon_schedule[surgeon_id] = [None] * self.total_slots
+        if anesthesia_id not in anesthesia_schedule:
+            anesthesia_schedule[anesthesia_id] = [None] * self.total_slots
 
-                # Bütün matrisleri seçilen kaynaklara göre dolduruyoruz
-                for s in range(start_slot, start_slot + duration):
-                    self.room_timelines[room_id][s] = op.id
-                    if surgeon_id:
-                        self.surgeon_timelines[surgeon_id][s] = op.id
-                    if team_id:
-                        self.anesthesia_timelines[team_id][s] = op.id
+        for offset in range(duration):
+            curr_slot = slot + offset
+            if curr_slot < self.total_slots:
+                room_schedule[room_id][curr_slot] = op_id
+                surgeon_schedule[surgeon_id][curr_slot] = op_id
+                anesthesia_schedule[anesthesia_id][curr_slot] = op_id
 
-                op.assigned_room_id = room_id
-                op.assigned_surgeon_id = surgeon_id
-                op.assigned_team_id = team_id
-                op.assigned_start_slot = start_slot
-                op.is_scheduled_temp = True
+    def optimize_schedule(self, operations, rooms, surgeons, anesthesias, day_name="Pazartesi",
+                          pre_assigned_operations=None):
+        sorted_ops = self.sort_operations_by_priority(operations)
 
-                scheduled_count += 1
+        room_schedule, surgeon_schedule, anesthesia_schedule = self.initialize_schedules(
+            rooms, surgeons, anesthesias, pre_assigned_operations=pre_assigned_operations
+        )
+
+        assigned_operations = []
+        unassigned_operations = []
+
+        for op in sorted_ops:
+            slot, room, surgeon, anesthesia = self.find_best_slot_for_operation(
+                operation=op,
+                rooms=rooms,
+                surgeons=surgeons,
+                anesthesias=anesthesias,
+                day_name=day_name,
+                room_schedule=room_schedule,
+                surgeon_schedule=surgeon_schedule,
+                anesthesia_schedule=anesthesia_schedule
+            )
+
+            if slot is not None:
+                self.assign_operation_to_schedule(
+                    op, slot, room, surgeon, anesthesia,
+                    room_schedule, surgeon_schedule, anesthesia_schedule
+                )
+                assigned_operations.append({
+                    'operation': op,
+                    'start_slot': slot,
+                    'room': room,
+                    'surgeon': surgeon,
+                    'anesthesia': anesthesia
+                })
             else:
-                op.is_scheduled_temp = False
-                unscheduled_count += 1
+                unassigned_operations.append(op)
 
         return {
-            'scheduled_count': scheduled_count,
-            'unscheduled_count': unscheduled_count,
-            'total_operations': len(self.operations)
+            'assigned': assigned_operations,
+            'unassigned': unassigned_operations,
+            'schedules': {
+                'room': room_schedule,
+                'surgeon': surgeon_schedule,
+                'anesthesia': anesthesia_schedule
+            }
         }
-
-    def _find_best_assignment(self, op):
-        duration = getattr(op, 'duration_slot', None) or getattr(op, 'duration', 2)
-        op_surgeon = getattr(op, 'surgeon', None)
-        op_team = getattr(op, 'anesthesia_team', None) or getattr(op, 'anesthesia', None) or getattr(op, 'team', None)
-
-        for start_slot in range(0, self.TOTAL_SLOTS - duration + 1):
-            for room in self.rooms:
-                # 1. Salon Uygunluk ve Müsaitlik Kontrolü
-                if not ScheduleConstraints.is_room_compatible(room, op):
-                    continue
-
-                if not ScheduleConstraints.is_room_available(
-                        self.room_timelines[room.id], start_slot, duration
-                ):
-                    continue
-
-                # 2. Cerrah Seçimi: Atanmış cerrah varsa kontrol et, yoksa havuzdan müsait olanı bul
-                assigned_surgeon_id = None
-                if op_surgeon:
-                    can_surgeon, _ = ScheduleConstraints.can_surgeon_operate_today(op_surgeon, self.day_name)
-                    if can_surgeon and ScheduleConstraints.is_surgeon_available(
-                            self.surgeon_timelines[op_surgeon.id], start_slot, duration
-                    ) and ScheduleConstraints.check_surgeon_max_consecutive(
-                        self.surgeon_timelines[op_surgeon.id], start_slot, duration
-                    ):
-                        assigned_surgeon_id = op_surgeon.id
-                else:
-                    for surgeon in self.surgeons:
-                        can_surgeon, _ = ScheduleConstraints.can_surgeon_operate_today(surgeon, self.day_name)
-                        if not can_surgeon:
-                            continue
-
-                        if ScheduleConstraints.is_surgeon_available(
-                                self.surgeon_timelines[surgeon.id], start_slot, duration
-                        ) and ScheduleConstraints.check_surgeon_max_consecutive(
-                            self.surgeon_timelines[surgeon.id], start_slot, duration
-                        ):
-                            assigned_surgeon_id = surgeon.id
-                            break
-
-                if not assigned_surgeon_id and self.surgeons:
-                    continue  # Müsait cerrah bulunamadıysa bu slot/salon seçeneğini atla
-
-                # 3. Anestezi Ekibi Seçimi: Atanmış ekip varsa kontrol et, yoksa havuzdan müsait olanı bul
-                assigned_team_id = None
-                if op_team:
-                    if ScheduleConstraints.is_anesthesia_available(
-                            self.anesthesia_timelines[op_team.id], start_slot, duration
-                    ):
-                        assigned_team_id = op_team.id
-                else:
-                    for team in self.anesthesia_teams:
-                        if ScheduleConstraints.is_anesthesia_available(
-                                self.anesthesia_timelines[team.id], start_slot, duration
-                        ):
-                            assigned_team_id = team.id
-                            break
-
-                if not assigned_team_id and self.anesthesia_teams:
-                    continue  # Müsait anestezi ekibi bulunamadıysa bu slot/salon seçeneğini atla
-
-                return {
-                    'room_id': room.id,
-                    'surgeon_id': assigned_surgeon_id,
-                    'team_id': assigned_team_id,
-                    'start_slot': start_slot
-                }
-
-        return None
-
-    def save_schedule(self):
-        updated_operations = []
-
-        with transaction.atomic():
-            for op in self.operations:
-                if getattr(op, 'is_scheduled_temp', False):
-                    op.room_id = op.assigned_room_id
-
-                    if getattr(op, 'assigned_surgeon_id', None):
-                        op.surgeon_id = op.assigned_surgeon_id
-
-                    if getattr(op, 'assigned_team_id', None):
-                        if hasattr(op, 'anesthesia_team_id'):
-                            op.anesthesia_team_id = op.assigned_team_id
-                        elif hasattr(op, 'anesthesia_id'):
-                            op.anesthesia_id = op.assigned_team_id
-
-                    op.start_slot = op.assigned_start_slot
-                    op.is_scheduled = True
-                    op.scheduled_date = self.date_obj.date()
-                    updated_operations.append(op)
-
-            if updated_operations:
-                # Django bulk_update, '_id' uzantısını değil modeldeki alan adlarını ('room', 'surgeon') kabul eder
-                model_field_names = [f.name for f in PatientOperation._meta.fields]
-
-                possible_fields = ['room', 'surgeon', 'anesthesia_team', 'anesthesia', 'start_slot', 'is_scheduled',
-                                   'scheduled_date']
-                fields_to_update = [f for f in possible_fields if f in model_field_names]
-
-                PatientOperation.objects.bulk_update(
-                    updated_operations,
-                    fields_to_update
-                )
-
-        return len(updated_operations)
