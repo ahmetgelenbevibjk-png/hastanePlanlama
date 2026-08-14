@@ -48,15 +48,24 @@ class ScheduleOptimizeView(APIView):
         if not day_name:
             day_name = 'Perşembe'
 
-        # 1. DÜZELTME: Zaten planlanmış (is_scheduled=True) ve henüz planlanmamış TÜM aktif operasyonları alıyoruz.
-        # Böylece önceden yerleşmiş olanlar hafızada tutulup çakışma önlenecek.
+            # Tüm aktif operasyonları alıyoruz
         all_operations = list(Operation.objects.filter(is_active=True))
 
-        # Algoritmanın yeniden konumlandırması/değerlendirmesi için bekleyenler:
-        pending_operations = [op for op in all_operations if not op.is_scheduled]
+        if not all_operations:
+            return Response(
+                {"message": "Sistemde hiç aktif operasyon bulunamadı."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-        # Zaten planlanmış olanlar (slotları kilitlenecek olanlar):
-        pre_assigned_operations = [op for op in all_operations if op.is_scheduled]
+        for op in all_operations:
+            op.is_scheduled = False
+            op.room = None
+            op.start_slot = None
+            op.surgeon = None
+            op.anesthesia = None
+
+        pending_operations = all_operations
+        pre_assigned_operations = []
 
         rooms = list(OperatingRoom.objects.filter(is_active=True))
 
@@ -78,18 +87,16 @@ class ScheduleOptimizeView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # 2. DÜZELTME: Optimizasyonu çalıştırırken pre_assigned_operations parametresini dahil ediyoruz
         optimizer = ScheduleOptimizer(total_slots=20)
         results = optimizer.optimize_schedule(
-            operations=pending_operations,  # Sadece planlanmamış olanlar sıraya konup dağıtılacak
+            operations=pending_operations,
             rooms=rooms,
             surgeons=surgeons,
             anesthesias=anesthesias,
             day_name=day_name,
-            pre_assigned_operations=pre_assigned_operations  # Daha önceden yerleşenler slotları kilitleyecek
+            pre_assigned_operations=pre_assigned_operations
         )
 
-        # Veritabanına Kalıcı Kayıt İşlemi
         try:
             with transaction.atomic():
                 for item in results['assigned']:
@@ -112,7 +119,6 @@ class ScheduleOptimizeView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-        # Response Dönen Veriyi Hazırla (Hem yeni atananlar hem de eskiden kilitli duranlar çizelgede görünsün diye birleştiriyoruz)
         all_assigned_for_response = results['assigned'] + [
             {
                 'operation': op,

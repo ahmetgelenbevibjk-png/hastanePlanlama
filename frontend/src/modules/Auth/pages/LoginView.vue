@@ -182,7 +182,7 @@ button {
   width: 100%;
   padding: 0.75rem;
   margin-top: 0.5rem;
-  background-color: #2563eb;
+  background-color: #6366F1;
   color: white;
   border: none;
   border-radius: 6px;
@@ -192,7 +192,7 @@ button {
 }
 
 button:hover:not(:disabled) {
-  background-color: #1d4ed8;
+  background-color: #312E81;
 }
 
 button:disabled {

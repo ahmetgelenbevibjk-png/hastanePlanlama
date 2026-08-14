@@ -68,7 +68,7 @@ const menuItems = [
 <style scoped>
 .sidebar-container {
   width: 72px;
-  background-color: #1e293b;
+  background-color: #312E81;
   height: calc(100vh - 60px);
   position:fixed;
   top:60px;
@@ -78,7 +78,7 @@ const menuItems = [
   align-items:center;
   padding-top:20px;
   z-index:99;
-  border-right:1px solid #334155;
+  border-right:1px solid #6366F1;
   transition:width 0.2s ease;
 }
 
@@ -103,12 +103,12 @@ const menuItems = [
 }
 
 .nav-item:hover{
-  background-color:#334155;
+  background-color:#6366F1;
   color:#ffffff;
 }
 
 .nav-item.router-link-active {
-  background-color:#2563eb;
+  background-color:#6366F1;
   color: #ffffff;
   box-shadow:0 4px 12px rgba(37,99,235,0.35);
 }

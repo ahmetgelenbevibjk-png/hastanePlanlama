@@ -1,9 +1,10 @@
 <template>
   <div id="app">
 
+    <Sidebar v-if="showSidebar"/>
+
     <Navbar v-if="showNavbar" />
 
-    <Sidebar/>
 
     <main class="main-content">
           <router-view />
@@ -20,8 +21,16 @@ import Sidebar from "@modules/sidebar/pages/Sidebar.vue";
 
 const route = useRoute()
 
+const isAuthPage = computed(() => {
+  return ['/login', '/register'].includes(route.path)
+})
+
 const showNavbar = computed(() => {
   return !['/login', '/register'].includes(route.path)
+})
+
+const showSidebar =computed(() => {
+  return !isAuthPage.value
 })
 </script>
 

@@ -8,16 +8,17 @@ def is_surgeon_available_on_day(surgeon,day_name):
     return surgeon.off_day.strip().lower() !=day_name.strip().lower()
 
 SPECIAL_ROOM_MAPPING= {
-    'Kalp Anjiyo':'OR-2',
-    'Tümör Operasyonu':'OR-4',
-    'Omurga Operasyonu':'OR-3'
+    'Genel Cerrahi':'OR-1',
+    'Kardiyoloji':'OR-2',
+    'Beyin Cerrahisi':'OR-4',
+    'Ortopedi':'OR-3'
                       }
 
 def is_specialty_matching(surgeon,operation):
     return surgeon.specialty==operation.required_specialty
 
 def is_room_compatible(room,operation):
-    required_room_name=SPECIAL_ROOM_MAPPING.get(operation.operation_name)
+    required_room_name=SPECIAL_ROOM_MAPPING.get(getattr(operation,'required_specialty',''))
 
     if required_room_name and room.name != required_room_name:
         return False
@@ -53,6 +54,20 @@ def has_surgeon_rested(surgeon_schedule,surgeon_id,start_slot):
 
 def can_assign_operation(operation,surgeon,room,anesthesia,start_slot,day_name,
                          room_schedule,surgeon_schedule,anesthesia_schedule,total_slots=20):
+    day_mapping = {
+        'Pazartesi': 'monday',
+        'Salı': 'tuesday',
+        'Çarşamba': 'wednesday',
+        'Perşembe': 'thursday',
+        'Cuma': 'friday',
+        'Cumartesi': 'saturday',
+        'Pazar': 'sunday'
+    }
+
+    current_day_key = day_mapping.get(day_name, '')
+    if getattr(surgeon, 'off_day', None) and surgeon.off_day == current_day_key:
+        return False
+
 
     if not check_slot_bounds(start_slot,operation.duration_slot,total_slots):
         return False
