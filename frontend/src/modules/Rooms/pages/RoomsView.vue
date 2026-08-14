@@ -1,51 +1,18 @@
 <template>
   <div class="page-container">
-    <!-- BAŞLIK SEKSİYONU -->
     <div class="page-header">
+
       <div>
         <h2>Ameliyathane Salon Yönetimi</h2>
         <p class="subtitle">Sistemde tanımlı ameliyathaneleri yönetin ve yeni salon ekleyin.</p>
       </div>
+      <button class="btn-primary-add" @click="isModalOpen=true">
+        ➕ Yeni Salon Ekle
+      </button>
     </div>
 
     <div class="content-grid">
-      <!-- SOL: YENİ SALON EKLEME FORMU -->
-      <div class="card form-card">
-        <div class="card-header">
-          <div class="icon-wrapper">
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-          </div>
-          <h3>Yeni Salon Ekle</h3>
-        </div>
 
-        <form @submit.prevent="handleCreate" class="styled-form">
-          <div class="form-group">
-            <label for="roomName">Salon Adı / Kodu</label>
-            <input
-              id="roomName"
-              v-model="newRoom.name"
-              type="text"
-              placeholder="Örn: OR-2 veya Salon 1"
-              required
-            />
-          </div>
-
-          <div class="form-group">
-            <label for="specialtyType">Özel Uzmanlık / Tipi (İsteğe Bağlı)</label>
-            <input
-              id="specialtyType"
-              v-model="newRoom.specialty_type"
-              type="text"
-              placeholder="Örn: Kalp Anjiyo, Omurga vb."
-            />
-          </div>
-
-          <button type="submit" class="btn-primary" :disabled="submitting">
-            <span v-if="submitting">Ekleniyor...</span>
-            <span v-else>+ Salon Ekle</span>
-          </button>
-        </form>
-      </div>
 
       <!-- SAĞ: SALON LİSTESİ TABLOSU -->
       <div class="card list-card">
@@ -104,30 +71,31 @@
             </tbody>
           </table>
         </div>
-
         <div v-else class="state-container empty">
           <div class="empty-icon">📂</div>
           <p>Henüz kayıtlı bir ameliyathane bulunmuyor.</p>
-          <small>Soldaki form üzerinden yeni bir tane ekleyebilirsiniz.</small>
         </div>
       </div>
     </div>
+    <AddRoomModal
+  :is-open="isModalOpen"
+  @close="isModalOpen = false"
+  @created="fetchRooms"
+/>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
 import { roomService } from '../services/roomService'
+import AddRoomModal from '../components/AddRoomModal.vue'
 
 const rooms = ref([])
 const loading = ref(false)
-const submitting = ref(false)
 const error = ref(null)
 
-const newRoom = ref({
-  name: '',
-  specialty_type: ''
-})
+
+const isModalOpen =ref(false)
 
 const fetchRooms = async () => {
   loading.value = true
@@ -143,21 +111,7 @@ const fetchRooms = async () => {
   }
 }
 
-const handleCreate = async () => {
-  if (!newRoom.value.name.trim()) return
 
-  submitting.value = true
-  try {
-    await roomService.create(newRoom.value)
-    newRoom.value = { name: '', specialty_type: '' }
-    await fetchRooms()
-  } catch (err) {
-    alert('Salon eklenirken hata oluştu!')
-    console.error(err)
-  } finally {
-    submitting.value = false
-  }
-}
 
 const handleDelete = async (id) => {
   if (!confirm('Bu salonu pasife almak istediğinize emin misiniz?')) return
@@ -186,7 +140,15 @@ onMounted(() => {
 }
 
 .page-header {
+  display: flex;
+  align-items:center;
+justify-content: space-between; /* Başlığı sola, butonu en sağa yaslar */
   margin-bottom: 28px;
+}
+
+.btn-primary-add:hover {
+  background:#1d4ed8;
+  transform:translateY(-1px);
 }
 
 .page-header h2 {
@@ -204,7 +166,7 @@ onMounted(() => {
 
 .content-grid {
   display: grid;
-  grid-template-columns: 360px 1fr;
+  grid-template-columns:1fr ;
   gap: 24px;
   align-items: start;
 }
@@ -268,37 +230,6 @@ onMounted(() => {
   border-radius: 20px;
 }
 
-.styled-form {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.form-group label {
-  font-size: 13px;
-  font-weight: 600;
-  color: #475569;
-}
-
-.form-group input {
-  padding: 10px 14px;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  font-size: 14px;
-  transition: all 0.2s ease;
-  outline: none;
-}
-
-.form-group input:focus {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
-}
 
 .btn-primary {
   background: #2563eb;
@@ -446,5 +377,20 @@ onMounted(() => {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+.btn-primary-add {
+  background:#2563eb;
+    color:white;
+  border:none;
+  padding:10px 18px;
+  border-radius:10px;
+  font-weight:600;
+  font-size:14px;
+  cursor:pointer;
+  transition:all 0.2s ease;
+    white-space:nowrap;
+  box-shadow:0 2px 4px rgba(37,99,235,0.2);
+  margin-right: 8px;
 }
 </style>

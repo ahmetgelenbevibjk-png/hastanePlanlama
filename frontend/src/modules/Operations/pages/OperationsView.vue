@@ -1,109 +1,18 @@
 <template>
   <div class="page-container">
+    <!-- BAŞLIK VE EKLE BUTONU SEKSİYONU -->
     <div class="page-header">
       <div>
         <h2>Operasyon Yönetimi</h2>
         <p class="subtitle">Planlanacak ameliyatları, sürelerini ve sorumlu ekipleri tanımlayın.</p>
       </div>
+      <button class="btn-primary-add" @click="isModalOpen = true">
+        ➕ Yeni Operasyon Ekle
+      </button>
     </div>
 
     <div class="content-grid">
-      <!-- SOL: YENİ OPERASYON EKLEME FORMU -->
-      <div class="card form-card">
-        <div class="card-header">
-          <div class="icon-wrapper">
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
-          </div>
-          <h3>Yeni Operasyon Ekle</h3>
-        </div>
-
-        <form @submit.prevent="handleCreate" class="styled-form">
-          <div class="form-group">
-            <label for="patientName">Hasta Adı Soyadı</label>
-            <input
-              id="patientName"
-              v-model="newOperation.patient_name"
-              type="text"
-              placeholder="Örn: Ahmet Yılmaz"
-              required
-            />
-          </div>
-
-          <div class="form-group">
-            <label for="opName">Operasyon Adı / Tanımı</label>
-            <input
-              id="opName"
-              v-model="newOperation.operation_name"
-              type="text"
-              placeholder="Örn: Açık Kalp Ameliyatı"
-              required
-            />
-          </div>
-
-          <div class="form-group">
-            <label for="specialty">Gerekli Uzmanlık / Branş</label>
-            <input
-              id="specialty"
-              v-model="newOperation.required_specialty"
-              type="text"
-              placeholder="Örn: Kalp ve Damar Cerrahisi"
-              required
-            />
-          </div>
-
-          <div class="form-row">
-            <div class="form-group">
-              <label for="duration">Tahmini Süre (Dakika)</label>
-              <input
-                id="duration"
-                v-model.number="newOperation.duration"
-                type="number"
-                placeholder="Örn: 120"
-                min="15"
-                step="15"
-                required
-              />
-            </div>
-
-            <div class="form-group">
-              <label for="priority">Öncelik Seviyesi</label>
-              <select id="priority" v-model="newOperation.priority" class="styled-select">
-                <option value="LOW">Düşük</option>
-                <option value="MEDIUM">Normal</option>
-                <option value="HIGH">Acil / Yüksek</option>
-                <option value="CRITICAL">Kritik 🚨</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label for="surgeon">Sorumlu Cerrah (İsteğe Bağlı)</label>
-            <select id="surgeon" v-model="newOperation.surgeon" class="styled-select">
-              <option value="">Otomatik Atansın (Algoritma)</option>
-              <option v-for="s in surgeons" :key="s.id" :value="s.id">
-                {{ s.name }} ({{ s.specialty || 'Branş Belirtilmemiş' }})
-              </option>
-            </select>
-          </div>
-
-          <div class="form-group">
-            <label for="anesthesia">Anestezi Ekibi (İsteğe Bağlı)</label>
-            <select id="anesthesia" v-model="newOperation.anesthesia_team" class="styled-select">
-              <option value="">Otomatik Atansın (Algoritma)</option>
-              <option v-for="a in anesthesiaTeams" :key="a.id" :value="a.id">
-                {{ a.name }}
-              </option>
-            </select>
-          </div>
-
-          <button type="submit" class="btn-primary" :disabled="submitting">
-            <span v-if="submitting">Ekleme Yapılıyor...</span>
-            <span v-else>+ Operasyon Ekle</span>
-          </button>
-        </form>
-      </div>
-
-      <!-- SAĞ: OPERASYON LİSTESİ -->
+      <!-- OPERASYON LİSTESİ -->
       <div class="card list-card">
         <div class="card-header space-between">
           <div class="title-with-icon">
@@ -175,10 +84,18 @@
         <div v-else class="state-container empty">
           <div class="empty-icon">🏥</div>
           <p>Henüz kayıtlı bir operasyon bulunmuyor.</p>
-          <small>Soldaki form üzerinden yeni bir ameliyat kaydı oluşturabilirsiniz.</small>
         </div>
       </div>
     </div>
+
+    <!-- Yeni Operasyon Modal Bileşeni -->
+    <AddOperationModal
+      :is-open="isModalOpen"
+      :surgeons="surgeons"
+      :anesthesia-teams="anesthesiaTeams"
+      @close="isModalOpen = false"
+      @created="fetchData"
+    />
   </div>
 </template>
 
@@ -187,24 +104,15 @@ import { ref, onMounted } from 'vue'
 import { operationService } from '@/modules/Operations/services/operationService'
 import { surgeonService } from '@/modules/Surgeons/services/surgeonService'
 import { anesthesiaService } from '@/modules/Anesthesia/services/anesthesiaService'
+import AddOperationModal from '@/modules/Operations//components/AddOperationModal.vue' 
 
 const operations = ref([])
 const surgeons = ref([])
 const anesthesiaTeams = ref([])
 
 const loading = ref(false)
-const submitting = ref(false)
 const error = ref(null)
-
-const newOperation = ref({
-  patient_name: '',
-  operation_name: '',
-  required_specialty: '',
-  duration: 60,
-  priority: 'MEDIUM',
-  surgeon: '',
-  anesthesia_team: ''
-})
+const isModalOpen = ref(false)
 
 const fetchData = async () => {
   loading.value = true
@@ -234,48 +142,6 @@ const fetchData = async () => {
   }
 }
 
-const handleCreate = async () => {
-  if (!newOperation.value.operation_name.trim()) return
-
-  submitting.value = true
-
-  // Dakikayı 30'arlık slot sayısına çeviriyoruz (Örn: 90dk -> 3 slot)
-  const calculatedSlots = Math.ceil((newOperation.value.duration || 30) / 30)
-
-  const payload = {
-    patient_name: newOperation.value.patient_name,
-    operation_name: newOperation.value.operation_name,
-    required_specialty: newOperation.value.required_specialty,
-    duration_slot: calculatedSlots, // Backend modelindeki alan adı
-    priority: newOperation.value.priority,
-    surgeon: newOperation.value.surgeon || null,
-    anesthesia: newOperation.value.anesthesia_team || null // Backend modelindeki FK adı
-  }
-
-  try {
-    await operationService.create(payload)
-    newOperation.value = {
-      patient_name: '',
-      operation_name: '',
-      required_specialty: '',
-      duration: 60,
-      priority: 'MEDIUM',
-      surgeon: '',
-      anesthesia_team: ''
-    }
-    await fetchData()
-  } catch (err) {
-    if (err.response && err.response.data) {
-      alert('Operasyon eklenirken hata: ' + JSON.stringify(err.response.data))
-    } else {
-      alert('Operasyon eklenirken hata oluştu!')
-    }
-    console.error(err)
-  } finally {
-    submitting.value = false
-  }
-}
-
 const handleDelete = async (id) => {
   if (!confirm('Bu operasyonu pasife almak istediğinize emin misiniz?')) return
 
@@ -287,8 +153,6 @@ const handleDelete = async (id) => {
     console.error(err)
   }
 }
-
-// ... diğer fonksiyonlar (handleCreate, handleDelete vb.)
 
 const formatPriority = (priority) => {
   if (!priority) return 'Normal'
@@ -308,8 +172,6 @@ const formatPriority = (priority) => {
       return 'Normal'
   }
 }
-
-// OperationsView.vue - <script setup> içine ekle:
 
 const calculateSlots = (op) => {
   if (!op) return { minutes: 0, slots: 0 }
@@ -353,6 +215,9 @@ onMounted(() => {
 }
 
 .page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin-bottom: 28px;
 }
 
@@ -369,17 +234,30 @@ onMounted(() => {
   margin: 0;
 }
 
-.content-grid {
-  display: grid;
-  grid-template-columns: 380px 1fr;
-  gap: 24px;
-  align-items: start;
+.btn-primary-add {
+  background: #2563eb;
+  color: white;
+  border: none;
+  padding: 10px 18px;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
 }
 
-@media (max-width: 960px) {
-  .content-grid {
-    grid-template-columns: 1fr;
-  }
+.btn-primary-add:hover {
+  background: #1d4ed8;
+  transform: translateY(-1px);
+}
+
+.content-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 24px;
+  align-items: start;
 }
 
 .card {
@@ -433,70 +311,6 @@ onMounted(() => {
   font-weight: 600;
   padding: 4px 10px;
   border-radius: 20px;
-}
-
-.styled-form {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.form-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.form-group label {
-  font-size: 13px;
-  font-weight: 600;
-  color: #475569;
-}
-
-.form-group input,
-.styled-select {
-  padding: 10px 14px;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  font-size: 14px;
-  transition: all 0.2s ease;
-  outline: none;
-  background-color: #fff;
-}
-
-.form-group input:focus,
-.styled-select:focus {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
-}
-
-.btn-primary {
-  background: #2563eb;
-  color: white;
-  border: none;
-  padding: 11px 16px;
-  border-radius: 8px;
-  font-weight: 600;
-  font-size: 14px;
-  cursor: pointer;
-  transition: background 0.2s ease;
-  width: 100%;
-  margin-top: 6px;
-}
-
-.btn-primary:hover {
-  background: #1d4ed8;
-}
-
-.btn-primary:disabled {
-  background: #94a3b8;
-  cursor: not-allowed;
 }
 
 .btn-danger-outline {
@@ -560,21 +374,19 @@ onMounted(() => {
   color: #0f172a;
 }
 
-.duration-badge {
-  background: #f1f5f9;
-  color: #334155;
-  padding: 4px 8px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 600;
-}
-
 .priority-badge {
   display: inline-block;
   padding: 4px 10px;
   border-radius: 20px;
   font-size: 12px;
   font-weight: 600;
+}
+
+.priority-badge.critical {
+  background: #7f1d1d;
+  color: #ffffff;
+  border: 1px solid #991b1b;
+  font-weight: 700;
 }
 
 .priority-badge.high {
@@ -622,13 +434,6 @@ onMounted(() => {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
-}
-
-.priority-badge.critical {
-  background: #7f1d1d;
-  color: #ffffff;
-  border: 1px solid #991b1b;
-  font-weight: 700;
 }
 
 .duration-container {

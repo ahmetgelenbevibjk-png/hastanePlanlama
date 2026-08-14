@@ -1,142 +1,18 @@
-<script setup>
-import { ref, onMounted } from 'vue'
-import { surgeonService } from '../services/surgeonService'
-
-const surgeons = ref([])
-const loading = ref(false)
-const submitting = ref(false)
-const error = ref(null)
-
-const newSurgeon = ref({
-  name: '',
-  specialty: '',
-  off_day: ''
-})
-
-const daysOfWeek = [
-  { value: 'monday', label: 'Pazartesi' },
-  { value: 'tuesday', label: 'Salı' },
-  { value: 'wednesday', label: 'Çarşamba' },
-  { value: 'thursday', label: 'Perşembe' },
-  { value: 'friday', label: 'Cuma' },
-  { value: 'saturday', label: 'Cumartesi' },
-  { value: 'sunday', label: 'Pazar' }
-]
-
-const fetchSurgeons = async () => {
-  loading.value = true
-  error.value = null
-  try {
-    const response = await surgeonService.getAll()
-    surgeons.value = Array.isArray(response.data) ? response.data : (response.data.results || [])
-  } catch (err) {
-    error.value = 'Cerrah listesi yüklenirken hata oluştu.'
-    console.error(err)
-  } finally {
-    loading.value = false
-  }
-}
-
-const handleCreate = async () => {
-  if (!newSurgeon.value.name.trim()) return
-
-  submitting.value = true
-  try {
-    await surgeonService.create(newSurgeon.value)
-    newSurgeon.value = { name: '', specialty: '', off_day: '' }
-    await fetchSurgeons()
-  } catch (err) {
-    alert('Cerrah eklenirken hata oluştu!')
-    console.error(err)
-  } finally {
-    submitting.value = false
-  }
-}
-
-const handleDelete = async (id) => {
-  if (!confirm('Bu doktoru pasife almak istediğinize emin misiniz?')) return
-
-  try {
-    await surgeonService.delete(id)
-    await fetchSurgeons()
-  } catch (err) {
-    alert('Silme işlemi başarısız.')
-    console.error(err)
-  }
-}
-
-const formatDay = (dayKey) => {
-  if (!dayKey) return 'İzin Yok'
-  const found = daysOfWeek.find(d => d.value.toLowerCase() === dayKey.toLowerCase())
-  return found ? found.label : dayKey
-}
-
-onMounted(() => {
-  fetchSurgeons()
-})
-</script>
-
 <template>
   <div class="page-container">
-    <!-- BAŞLIK SEKSİYONU -->
+    <!-- BAŞLIK VE EKLE BUTONU SEKSİYONU -->
     <div class="page-header">
       <div>
         <h2>Cerrah Yönetimi</h2>
         <p class="subtitle">Sistemdeki uzman doktorları ve branşlarını yönetin.</p>
       </div>
+      <button class="btn-primary-add" @click="isModalOpen = true">
+        ➕ Yeni Cerrah Ekle
+      </button>
     </div>
 
     <div class="content-grid">
-      <!-- SOL: YENİ CERRAH EKLEME FORMU -->
-      <div class="card form-card">
-        <div class="card-header">
-          <div class="icon-wrapper">
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><line x1="20" y1="8" x2="20" y2="14"></line><line x1="23" y1="11" x2="17" y2="11"></line></svg>
-          </div>
-          <h3>Yeni Cerrah Ekle</h3>
-        </div>
-
-        <form @submit.prevent="handleCreate" class="styled-form">
-          <div class="form-group">
-            <label for="surgeonName">Doktor Adı Soyadı</label>
-            <input
-              id="surgeonName"
-              v-model="newSurgeon.name"
-              type="text"
-              placeholder="Örn: Prof. Dr. Ahmet Yılmaz"
-              required
-            />
-          </div>
-
-          <div class="form-group">
-            <label for="specialty">Uzmanlık Alanı / Branş</label>
-            <input
-              id="specialty"
-              v-model="newSurgeon.specialty"
-              type="text"
-              placeholder="Örn: Genel Cerrahi, Kalp Damar, Ortopedi"
-              required
-            />
-          </div>
-
-          <div class="form-group">
-            <label for="offDay">İzinli Gün (İsteğe Bağlı)</label>
-            <select id="offDay" v-model="newSurgeon.off_day" class="styled-select">
-              <option value="">İzin Günü Yok</option>
-              <option v-for="d in daysOfWeek" :key="d.value" :value="d.value">
-                {{ d.label }}
-              </option>
-            </select>
-          </div>
-
-          <button type="submit" class="btn-primary" :disabled="submitting">
-            <span v-if="submitting">Ekleniyor...</span>
-            <span v-else>+ Cerrah Ekle</span>
-          </button>
-        </form>
-      </div>
-
-      <!-- SAĞ: CERRAH LİSTESİ TABLOSU -->
+      <!-- CERRAH LİSTESİ TABLOSU -->
       <div class="card list-card">
         <div class="card-header space-between">
           <div class="title-with-icon">
@@ -203,12 +79,75 @@ onMounted(() => {
         <div v-else class="state-container empty">
           <div class="empty-icon">👨‍⚕️</div>
           <p>Henüz kayıtlı bir cerrah bulunmuyor.</p>
-          <small>Soldaki form üzerinden yeni bir cerrah ekleyebilirsiniz.</small>
         </div>
       </div>
     </div>
+
+    <!-- Yeni Cerrah Modal Bileşeni -->
+    <AddSurgeonModal
+      :is-open="isModalOpen"
+      @close="isModalOpen = false"
+      @created="fetchSurgeons"
+    />
   </div>
 </template>
+
+<script setup>
+import { ref, onMounted } from 'vue'
+import { surgeonService } from '../services/surgeonService'
+import AddSurgeonModal from '../components/AddSurgeonModal.vue'
+
+const surgeons = ref([])
+const loading = ref(false)
+const error = ref(null)
+const isModalOpen = ref(false)
+
+const daysOfWeek = [
+  { value: 'monday', label: 'Pazartesi' },
+  { value: 'tuesday', label: 'Salı' },
+  { value: 'wednesday', label: 'Çarşamba' },
+  { value: 'thursday', label: 'Perşembe' },
+  { value: 'friday', label: 'Cuma' },
+  { value: 'saturday', label: 'Cumartesi' },
+  { value: 'sunday', label: 'Pazar' }
+]
+
+const fetchSurgeons = async () => {
+  loading.value = true
+  error.value = null
+  try {
+    const response = await surgeonService.getAll()
+    surgeons.value = Array.isArray(response.data) ? response.data : (response.data.results || [])
+  } catch (err) {
+    error.value = 'Cerrah listesi yüklenirken hata oluştu.'
+    console.error(err)
+  } finally {
+    loading.value = false
+  }
+}
+
+const handleDelete = async (id) => {
+  if (!confirm('Bu doktoru pasife almak istediğinize emin misiniz?')) return
+
+  try {
+    await surgeonService.delete(id)
+    await fetchSurgeons()
+  } catch (err) {
+    alert('Silme işlemi başarısız.')
+    console.error(err)
+  }
+}
+
+const formatDay = (dayKey) => {
+  if (!dayKey) return 'İzin Yok'
+  const found = daysOfWeek.find(d => d.value.toLowerCase() === dayKey.toLowerCase())
+  return found ? found.label : dayKey
+}
+
+onMounted(() => {
+  fetchSurgeons()
+})
+</script>
 
 <style scoped>
 .page-container {
@@ -220,6 +159,9 @@ onMounted(() => {
 }
 
 .page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin-bottom: 28px;
 }
 
@@ -236,17 +178,30 @@ onMounted(() => {
   margin: 0;
 }
 
-.content-grid {
-  display: grid;
-  grid-template-columns: 360px 1fr;
-  gap: 24px;
-  align-items: start;
+.btn-primary-add {
+  background: #2563eb;
+  color: white;
+  border: none;
+  padding: 10px 18px;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
 }
 
-@media (max-width: 900px) {
-  .content-grid {
-    grid-template-columns: 1fr;
-  }
+.btn-primary-add:hover {
+  background: #1d4ed8;
+  transform: translateY(-1px);
+}
+
+.content-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 24px;
+  align-items: start;
 }
 
 .card {
@@ -300,63 +255,6 @@ onMounted(() => {
   font-weight: 600;
   padding: 4px 10px;
   border-radius: 20px;
-}
-
-.styled-form {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.form-group label {
-  font-size: 13px;
-  font-weight: 600;
-  color: #475569;
-}
-
-.form-group input,
-.styled-select {
-  padding: 10px 14px;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  font-size: 14px;
-  transition: all 0.2s ease;
-  outline: none;
-  background-color: #fff;
-}
-
-.form-group input:focus,
-.styled-select:focus {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
-}
-
-.btn-primary {
-  background: #2563eb;
-  color: white;
-  border: none;
-  padding: 11px 16px;
-  border-radius: 8px;
-  font-weight: 600;
-  font-size: 14px;
-  cursor: pointer;
-  transition: background 0.2s ease;
-  width: 100%;
-}
-
-.btn-primary:hover {
-  background: #1d4ed8;
-}
-
-.btn-primary:disabled {
-  background: #94a3b8;
-  cursor: not-allowed;
 }
 
 .btn-danger-outline {

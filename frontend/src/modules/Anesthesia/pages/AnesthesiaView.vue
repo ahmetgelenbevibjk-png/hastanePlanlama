@@ -1,53 +1,34 @@
 <script setup>
-import {ref , onMounted} from 'vue'
-import {anesthesiaService } from '../services/anesthesiaService'
+import { ref, onMounted } from 'vue'
+import { anesthesiaService } from '../services/anesthesiaService'
+import AddAnesthesiaTeamModal from '../components/AddAnesthesiaTeamModal.vue'
 
-const teams=ref([])
-const loading= ref(false)
-const submitting=ref(false)
-const error= ref(null)
+const teams = ref([])
+const loading = ref(false)
+const error = ref(null)
+const isModalOpen = ref(false)
 
-const newTeam=ref({
-  name:'',
-})
-
-const fetchTeams=async ()=> {
-  loading.value=true
-  error.value=null
-  try{
-    const response =await anesthesiaService.getAll()
-    teams.value =response.data
-  }catch(err){
-    error.value='Anestezi ekipleri yüklenirken hata oluştu.'
-    console.error(err)
-  }finally{
-    loading.value=false
-  }
-}
-
-const handleCreate= async () => {
-  if(!newTeam.value.name.trim()) return
-
-  submitting.value=true
+const fetchTeams = async () => {
+  loading.value = true
+  error.value = null
   try {
-    await anesthesiaService.create(newTeam.value)
-    newTeam.value={name:''}
-    await fetchTeams()
-  }catch(err) {
-    alert('Ekip eklenirken hata oluştu!')
+    const response = await anesthesiaService.getAll()
+    teams.value = response.data
+  } catch (err) {
+    error.value = 'Anestezi ekipleri yüklenirken hata oluştu.'
     console.error(err)
   } finally {
-    submitting.value =false
+    loading.value = false
   }
 }
 
-const handleDelete= async(id)=> {
-  if(!confirm('Bu anestezi ekibini pasife almak istediğinize emin misiniz?')) return
+const handleDelete = async (id) => {
+  if (!confirm('Bu anestezi ekibini pasife almak istediğinize emin misiniz?')) return
 
-  try{
+  try {
     await anesthesiaService.delete(id)
     await fetchTeams()
-  }catch (err) {
+  } catch (err) {
     alert('Silme işlemi başarısız.')
     console.error(err)
   }
@@ -56,52 +37,23 @@ const handleDelete= async(id)=> {
 onMounted(() => {
   fetchTeams()
 })
-
-
 </script>
 
 <template>
-<div class="page-container">
-    <!-- BAŞLIK SEKSİYONU -->
+  <div class="page-container">
+    <!-- BAŞLIK SEKSİYONU VE EKLE BUTONU -->
     <div class="page-header">
       <div>
         <h2>Anestezi Ekipleri Yönetimi</h2>
         <p class="subtitle">Sistemdeki anestezi doktorlarını ve tekniker ekiplerini yönetin.</p>
       </div>
+      <button class="btn-primary-add" @click="isModalOpen = true">
+        ➕ Yeni Ekip Ekle
+      </button>
     </div>
 
     <div class="content-grid">
-      <!-- SOL: YENİ ANESTEZİ EKİBİ EKLEME FORMU -->
-      <div class="card form-card">
-        <div class="card-header">
-          <div class="icon-wrapper">
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49 0 2.81.47 3.84 1.25M1 14c1.03-.78 2.35-1.25 3.84-1.25M12 2a4 4 0 0 0-4 4v2a4 4 0 0 0 8 0V6a4 4 0 0 0-4-4z"></path><path d="M18 14.28V14a6 6 0 0 0-12 0v.28"></path></svg>
-          </div>
-          <h3>Yeni Ekip Ekle</h3>
-        </div>
-
-        <form @submit.prevent="handleCreate" class="styled-form">
-          <div class="form-group">
-            <label for="teamName">Ekip / Sorumlu Adı</label>
-            <input
-              id="teamName"
-              v-model="newTeam.name"
-              type="text"
-              placeholder="Örn: Anestezi Ekibi A (Dr. Mehmet)"
-              required
-            />
-          </div>
-
-
-
-          <button type="submit" class="btn-primary" :disabled="submitting">
-            <span v-if="submitting">Ekleniyor...</span>
-            <span v-else>+ Ekip Ekle</span>
-          </button>
-        </form>
-      </div>
-
-      <!-- SAĞ: ANESTEZİ EKİPLERİ LİSTESİ -->
+      <!-- ANESTEZİ EKİPLERİ LİSTESİ -->
       <div class="card list-card">
         <div class="card-header space-between">
           <div class="title-with-icon">
@@ -162,23 +114,32 @@ onMounted(() => {
         <div v-else class="state-container empty">
           <div class="empty-icon">💉</div>
           <p>Henüz kayıtlı bir anestezi ekibi bulunmuyor.</p>
-          <small>Soldaki form üzerinden yeni bir ekip ekleyebilirsiniz.</small>
         </div>
       </div>
     </div>
+
+    <!-- Modal Bileşeni -->
+    <AddAnesthesiaTeamModal
+      :is-open="isModalOpen"
+      @close="isModalOpen = false"
+      @created="fetchTeams"
+    />
   </div>
 </template>
 
 <style scoped>
 .page-container {
-  max-width:1200px;
+  max-width: 1200px;
   margin: 0 auto;
   padding: 30px 20px;
-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-color: #1e293b;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  color: #1e293b;
 }
 
 .page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin-bottom: 28px;
 }
 
@@ -186,42 +147,55 @@ color: #1e293b;
   font-size: 24px;
   font-weight: 700;
   color: #0f172a;
-  margin: 0 0 6px 0 ;
+  margin: 0 0 6px 0;
 }
 
 .subtitle {
   color: #64748b;
-  font-size:14px;
-  margin: 0 ;
+  font-size: 14px;
+  margin: 0;
+}
+
+.btn-primary-add {
+  background: #2563eb;
+  color: white;
+  border: none;
+  padding: 10px 18px;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
+}
+
+.btn-primary-add:hover {
+  background: #1d4ed8;
+  transform: translateY(-1px);
 }
 
 .content-grid {
   display: grid;
-  grid-template-columns: 360px 1fr;
+  grid-template-columns: 1fr;
   gap: 24px;
-  align-items:start;
-}
-
-@media( max-width:900px) {
-  .content-grid {
-    grid-template-columns:1fr;
-  }
+  align-items: start;
 }
 
 .card {
   background: #ffffff;
-  border-radius:12px;
+  border-radius: 12px;
   border: 1px solid #e2e8f0;
-  box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
-  padding:24px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+  padding: 24px;
 }
 
 .card-header {
   display: flex;
   align-items: center;
-  gap:12px;
-  margin-bottom:16px;
-  border-bottom:1px solid #f1f5f9;
+  gap: 12px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid #f1f5f9;
 }
 
 .card-header.space-between {
@@ -236,9 +210,9 @@ color: #1e293b;
 
 .card-header h3 {
   font-size: 16px;
-  font-weight:600;
+  font-weight: 600;
   color: #1e293b;
-  margin: 0 ;
+  margin: 0;
 }
 
 .icon-wrapper {
@@ -253,80 +227,26 @@ color: #1e293b;
 
 .count-badge {
   background: #f1f5f9;
-  color:#475569;
-  font-size: 12px;
-  font-weight:600;
-  padding: 4px 10px;
-  border-radius:20px
-}
-
-.styled-form {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.form-group label {
-  font-size: 13px;
-  font-weight: 600;
   color: #475569;
-}
-
-.form-group input {
-  padding:10px 14px;
-  border:1px solid #cbd5e1;
-  border-radius: 8px;
-  font-size: 14px;
-  transition: all 0.2s ease;
-  outline: none ;
-}
-
-.form-group input:focus {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37,99,235,0.15);
-}
-
-.btn-primary {
-  background: #2563eb;
-  color:white;
-  border:none;
-  padding: 11px 16px;
-  border-radius:8px;
-  font-weight:600;
-  font-size: 14px;
-  cursor:pointer;
-  transition: background 0.2s ease;
-  width: 100%;
-}
-
-.btn-primary:hover {
-  background: #1d4ed8;
-}
-
-.btn-primary:disabled {
-  background: #94a3b8;
-  cursor: not-allowed;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 20px;
 }
 
 .btn-danger-outline {
-  background:transparent;
+  background: transparent;
   color: #ef4444;
-  border:1px solid #fca5a5;
+  border: 1px solid #fca5a5;
   padding: 6px 12px;
-  border-radius:6px;
-  font-size:13px;
-  font-weight:500;
-  cursor:pointer;
-  display:inline-flex;
-  align-items:center;
-  gap:6px;
-  transition:all 0.2s ease;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
 }
 
 .btn-danger-outline:hover {
@@ -335,7 +255,7 @@ color: #1e293b;
 }
 
 .table-wrapper {
-  overflow-x:auto;
+  overflow-x: auto;
 }
 
 .styled-table {
@@ -439,32 +359,4 @@ color: #1e293b;
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 </style>
