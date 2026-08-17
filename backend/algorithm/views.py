@@ -48,7 +48,7 @@ class ScheduleOptimizeView(APIView):
         if not day_name:
             day_name = 'Perşembe'
 
-            # Tüm aktif operasyonları alıyoruz
+        # Tüm aktif operasyonları alıyoruz
         all_operations = list(Operation.objects.filter(is_active=True))
 
         if not all_operations:
@@ -57,6 +57,7 @@ class ScheduleOptimizeView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        # Mevcut atamaları bellekte sıfırla
         for op in all_operations:
             op.is_scheduled = False
             op.room = None
@@ -65,43 +66,37 @@ class ScheduleOptimizeView(APIView):
             op.anesthesia = None
 
         pending_operations = all_operations
-        pre_assigned_operations = []
 
         rooms = list(OperatingRoom.objects.filter(is_active=True))
-
         surgeons = list(
             Surgeon.objects.filter(is_active=True)
             if hasattr(Surgeon, 'is_active')
             else Surgeon.objects.all()
         )
-
         anesthesias = list(
             AnesthesiaTeam.objects.filter(is_active=True)
             if hasattr(AnesthesiaTeam, 'is_active')
             else AnesthesiaTeam.objects.all()
         )
 
-        if not all_operations:
-            return Response(
-                {"message": "Sistemde hiç aktif operasyon bulunamadı."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
+        # 5 farklı alternatif plan simüle ediliyor
         optimizer = ScheduleOptimizer(total_slots=20)
-        results = optimizer.optimize_schedule(
+        results = optimizer.optimize_with_alternatives(
             operations=pending_operations,
             rooms=rooms,
             surgeons=surgeons,
             anesthesias=anesthesias,
             day_name=day_name,
-            pre_assigned_operations=pre_assigned_operations
+            num_candidates=5
         )
 
+        best_plan = results['best_plan']
+
+        # En iyi planı veritabanına kaydet
         try:
             with transaction.atomic():
-                for item in results['assigned']:
+                for item in best_plan['assigned']:
                     op = item['operation']
-
                     op.room = item['room']
                     op.start_slot = item['start_slot']
                     op.surgeon = item['surgeon']
@@ -119,41 +114,47 @@ class ScheduleOptimizeView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-        all_assigned_for_response = results['assigned'] + [
-            {
-                'operation': op,
-                'start_slot': op.start_slot,
-                'room': op.room,
-                'surgeon': op.surgeon,
-                'anesthesia': op.anesthesia
-            }
-            for op in pre_assigned_operations if op not in [i['operation'] for i in results['assigned']]
-        ]
+        # ORM nesnelerini JSON'a uygun sözlüklere dönüştüren yardımcı fonksiyon
+        def format_assigned_list(assigned_list):
+            formatted = []
+            for item in assigned_list:
+                op = item['operation']
+                room = item['room']
+                surgeon = item['surgeon']
+                anesthesia = item['anesthesia']
+                start_slot = item['start_slot']
 
-        formatted_assigned = []
-        for item in all_assigned_for_response:
-            op = item['operation']
-            room = item['room']
-            surgeon = item['surgeon']
-            anesthesia = item['anesthesia']
-            start_slot = item['start_slot']
+                formatted.append({
+                    'operation_id': getattr(op, 'id', None),
+                    'patient_name': getattr(op, 'patient_name', f"Hasta #{getattr(op, 'id', '')}"),
+                    'operation_name': getattr(op, 'operation_name', 'Ameliyat'),
+                    'priority': getattr(op, 'priority', 'NORMAL'),
+                    'start_slot': start_slot,
+                    'duration_slot': getattr(op, 'duration_slot', 1),
+                    'penalty': item.get('penalty', 0),
+                    'room_id': getattr(room, 'id', None) if room else None,
+                    'room_name': getattr(room, 'name', f"OR-{getattr(room, 'id', '')}") if room else "Salon Yok",
+                    'surgeon_id': getattr(surgeon, 'id', None) if surgeon else None,
+                    'surgeon_name': getattr(surgeon, 'name', getattr(surgeon, 'full_name', f"Dr. {getattr(surgeon, 'id', '')}")) if surgeon else "Cerrah Yok",
+                    'anesthesia_id': getattr(anesthesia, 'id', None) if anesthesia else None,
+                    'anesthesia_name': getattr(anesthesia, 'name', getattr(anesthesia, 'team_name', f"Ekip {getattr(anesthesia, 'id', '')}")) if anesthesia else "Ekip Yok"
+                })
+            return formatted
 
-            formatted_assigned.append({
-                'operation_id': getattr(op, 'id', None),
-                'patient_name': getattr(op, 'patient_name', f"Hasta #{getattr(op, 'id', '')}"),
-                'operation_name': getattr(op, 'operation_name', 'Ameliyat'),
-                'priority': getattr(op, 'priority', 'NORMAL'),
-                'start_slot': start_slot,
-                'duration_slot': getattr(op, 'duration_slot', 1),
-                'room_id': getattr(room, 'id', None) if room else None,
-                'room_name': getattr(room, 'name', f"OR-{getattr(room, 'id', '')}") if room else "Salon Yok",
-                'surgeon_id': getattr(surgeon, 'id', None) if surgeon else None,
-                'surgeon_name': getattr(surgeon, 'name', getattr(surgeon, 'full_name',
-                                                                 f"Dr. {getattr(surgeon, 'id', '')}")) if surgeon else "Cerrah Yok",
-                'anesthesia_id': getattr(anesthesia, 'id', None) if anesthesia else None,
-                'anesthesia_name': getattr(anesthesia, 'name', getattr(anesthesia, 'team_name',
-                                                                       f"Ekip {getattr(anesthesia, 'id', '')}")) if anesthesia else "Ekip Yok"
+        # Aday senaryoları JSON serileştirmeye uygun hale getirme
+        formatted_candidates = []
+        for c in results['all_candidates']:
+            formatted_candidates.append({
+                'id': c['candidate_id'],
+                'name': c['strategy_name'],
+                'fitness_score': c['fitness_score'],
+                'total_penalty': c['total_penalty'],
+                'assigned_count': c['assigned_count'],
+                'unassigned_count': c['unassigned_count'],
+                'assigned': format_assigned_list(c['assigned'])
             })
+
+        formatted_assigned = format_assigned_list(best_plan['assigned'])
 
         formatted_unassigned = [
             {
@@ -163,14 +164,16 @@ class ScheduleOptimizeView(APIView):
                 'priority': getattr(op, 'priority', 'NORMAL'),
                 'reason': 'Kısıtları sağlayan uygun slot veya kaynak bulunamadı.'
             }
-            for op in results['unassigned']
+            for op in best_plan['unassigned']
         ]
 
         return Response({
             'status': 'success',
             'day': day_name,
+            'fitness_score': best_plan['fitness_score'],
             'assigned_count': len(formatted_assigned),
             'unassigned_count': len(formatted_unassigned),
             'assigned': formatted_assigned,
-            'unassigned': formatted_unassigned
+            'unassigned': formatted_unassigned,
+            'candidates': formatted_candidates
         }, status=status.HTTP_200_OK)

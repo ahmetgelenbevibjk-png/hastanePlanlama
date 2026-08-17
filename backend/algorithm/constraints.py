@@ -39,18 +39,6 @@ def is_resource_free(resource_schedule,resource_id,start_slot,duration_slot):
 
     return True
 
-def has_surgeon_rested(surgeon_schedule,surgeon_id,start_slot):
-
-    slots=surgeon_schedule.get(surgeon_id,[])
-
-    if start_slot<4:
-        return True
-
-    recent_4_slots=slots[start_slot-4:start_slot]
-    if all(slot_val is not None for slot_val in recent_4_slots):
-        return False
-
-    return True
 
 def can_assign_operation(operation,surgeon,room,anesthesia,start_slot,day_name,
                          room_schedule,surgeon_schedule,anesthesia_schedule,total_slots=20):
@@ -79,9 +67,6 @@ def can_assign_operation(operation,surgeon,room,anesthesia,start_slot,day_name,
         return False
 
     if not is_room_compatible(room,operation):
-        return False
-
-    if not has_surgeon_rested(surgeon_schedule,surgeon.id,start_slot):
         return False
 
     if not is_resource_free(room_schedule, room.id, start_slot, operation.duration_slot):
