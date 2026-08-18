@@ -1,29 +1,29 @@
-import random
 from .constraints import can_assign_operation
 from .penalties import calculate_assignment_penalty, calculate_fitness_percentage
+from .constants import (
+    PRIORITY_WEIGHTS,
+    DEFAULT_TOTAL_SLOTS,
+    SLOT_DURATION_MINUTES,
+    DEFAULT_UNASSIGNED_PENALTY,
+    DEFAULT_MAX_PENALTY_LIMIT,
+    ALTERNATIVE_MAX_PENALTY_LIMIT,
+    HIGH_PRIORITY_THRESHOLD,
+    DEFAULT_DAY_NAME,
+    DEFAULT_NUM_CANDIDATES,
+    STRATEGY_CONFIGS
+)
 
 
 class ScheduleOptimizer:
 
-    PRIORITY_WEIGHTS = {
-        'KRITIK': 4,
-        'CRITICAL': 4,
-        'YÜKSEK': 3,
-        'HIGH': 3,
-        'NORMAL': 2,
-        'MEDIUM': 2,
-        'DÜŞÜK': 1,
-        'LOW': 1,
-    }
-
-    def __init__(self, total_slots=20):
+    def __init__(self, total_slots=DEFAULT_TOTAL_SLOTS):
         self.total_slots = total_slots
 
     def _get_op_priority(self, op):
         p = getattr(op, 'priority', '')
         if not p:
             return 0
-        return self.PRIORITY_WEIGHTS.get(str(p).upper(), 0)
+        return PRIORITY_WEIGHTS.get(str(p).upper(), 0)
 
     def _get_op_duration(self, op):
         dur = getattr(op, 'duration_slot', None)
@@ -31,7 +31,7 @@ class ScheduleOptimizer:
             return int(dur)
         raw_dur = getattr(op, 'duration', None)
         if raw_dur is not None:
-            return max(1, int(raw_dur) // 30)
+            return max(1, int(raw_dur) // SLOT_DURATION_MINUTES)
         return 1
 
     def sort_operations_by_priority(self, operations):
@@ -69,22 +69,12 @@ class ScheduleOptimizer:
         return room_schedule, surgeon_schedule, anesthesia_schedule
 
     def find_best_slot_for_operation(self, operation, rooms, surgeons, anesthesias, day_name,
-                                    room_schedule, surgeon_schedule, anesthesia_schedule,
-                                    shuffle_rooms=False, shuffle_slots=False):
+                                    room_schedule, surgeon_schedule, anesthesia_schedule):
         best_option = None
         lowest_penalty = float('inf')
 
-        room_list = list(rooms)
-        if shuffle_rooms:
-            random.shuffle(room_list)
-
-        slot_list = list(range(self.total_slots))
-        if shuffle_slots:
-            # Belirli stratejilerde saatleri ters veya esnek tarayarak farklı slotlara yerleşmesini sağla
-            slot_list.sort(key=lambda x: random.random())
-
-        for slot in slot_list:
-            for room in room_list:
+        for slot in range(self.total_slots):
+            for room in rooms:
                 for surgeon in surgeons:
                     for anesthesia in anesthesias:
                         if can_assign_operation(
@@ -105,7 +95,7 @@ class ScheduleOptimizer:
                                 lowest_penalty = penalty
                                 best_option = (slot, room, surgeon, anesthesia, penalty)
 
-                                if penalty == 0 and not shuffle_rooms and not shuffle_slots:
+                                if penalty == 0:
                                     return slot, room, surgeon, anesthesia, penalty
 
         if best_option:
@@ -135,7 +125,7 @@ class ScheduleOptimizer:
                 surgeon_schedule[surgeon_id][curr_slot] = op_id
                 anesthesia_schedule[anesthesia_id][curr_slot] = op_id
 
-    def optimize_schedule(self, operations, rooms, surgeons, anesthesias, day_name="Pazartesi",
+    def optimize_schedule(self, operations, rooms, surgeons, anesthesias, day_name=DEFAULT_DAY_NAME,
                           pre_assigned_operations=None):
         sorted_ops = self.sort_operations_by_priority(operations)
 
@@ -176,9 +166,9 @@ class ScheduleOptimizer:
                 })
             else:
                 unassigned_operations.append(op)
-                total_schedule_penalty += 50
+                total_schedule_penalty += DEFAULT_UNASSIGNED_PENALTY
 
-        max_penalty_limit = max(200, len(operations) * 50)
+        max_penalty_limit = max(DEFAULT_MAX_PENALTY_LIMIT, len(operations) * DEFAULT_UNASSIGNED_PENALTY)
         fitness_score = calculate_fitness_percentage(total_schedule_penalty, max_tolerable_penalty=max_penalty_limit)
         return {
             'assigned': assigned_operations,
@@ -191,44 +181,30 @@ class ScheduleOptimizer:
             }
         }
 
-    def optimize_with_alternatives(self, operations, rooms, surgeons, anesthesias, day_name="Pazartesi",
-                                   num_candidates=5):
+    def optimize_with_alternatives(self, operations, rooms, surgeons, anesthesias, day_name=DEFAULT_DAY_NAME,
+                                   num_candidates=DEFAULT_NUM_CANDIDATES):
         candidates = []
 
-        # Her stratejinin hedefi ve ceza çarpanları farklılaştırıldı
         strategies = [
             {
-                'name': 'Öncelik Odaklı (Standart)',
+                **STRATEGY_CONFIGS[0],
                 'sort': lambda ops: sorted(ops, key=lambda op: self._get_op_priority(op), reverse=True),
-                'unassigned_penalty': 50,
-                'penalty_multiplier': 1.0
             },
             {
-                'name': 'Kritik Vaka Hassasiyeti',
-                'sort': lambda ops: sorted(ops,
-                                           key=lambda op: (self._get_op_priority(op) >= 3, self._get_op_priority(op)),
-                                           reverse=True),
-                'unassigned_penalty': 80,  # Kritik vaka dışarıda kalırsa yüksek ceza keser
-                'penalty_multiplier': 1.3
+                **STRATEGY_CONFIGS[1],
+                'sort': lambda ops: sorted(ops, key=lambda op: (self._get_op_priority(op) >= HIGH_PRIORITY_THRESHOLD, self._get_op_priority(op)), reverse=True),
             },
             {
-                'name': 'Salon Kapasite Verimliliği',
+                **STRATEGY_CONFIGS[2],
                 'sort': lambda ops: sorted(ops, key=lambda op: self._get_op_duration(op), reverse=True),
-                'unassigned_penalty': 40,  # Uzun ameliyatları yerleştirmeyi ödüllendirir
-                'penalty_multiplier': 0.8
             },
             {
-                'name': 'Hızlı Sirkülasyon (Vaka Sayısı)',
+                **STRATEGY_CONFIGS[3],
                 'sort': lambda ops: sorted(ops, key=lambda op: -self._get_op_duration(op), reverse=True),
-                'unassigned_penalty': 30,  # Çok sayıda ameliyat bitirmeye odaklanır
-                'penalty_multiplier': 0.6
             },
             {
-                'name': 'Dengeli Cerrah Programı',
-                'sort': lambda ops: sorted(ops, key=lambda op: (getattr(getattr(op, 'surgeon', None), 'id', 0),
-                                                                self._get_op_priority(op)), reverse=True),
-                'unassigned_penalty': 45,
-                'penalty_multiplier': 1.0
+                **STRATEGY_CONFIGS[4],
+                'sort': lambda ops: sorted(ops, key=lambda op: (getattr(getattr(op, 'surgeon', None), 'id', 0), self._get_op_priority(op)), reverse=True),
             }
         ]
 
@@ -237,8 +213,7 @@ class ScheduleOptimizer:
                 strat = strategies[i % len(strategies)]
                 sorted_ops = strat['sort'](operations)
 
-                room_schedule, surgeon_schedule, anesthesia_schedule = self.initialize_schedules(rooms, surgeons,
-                                                                                                 anesthesias)
+                room_schedule, surgeon_schedule, anesthesia_schedule = self.initialize_schedules(rooms, surgeons, anesthesias)
                 assigned_operations = []
                 unassigned_operations = []
                 total_schedule_penalty = 0
@@ -260,7 +235,6 @@ class ScheduleOptimizer:
                             op, slot, room, surgeon, anesthesia,
                             room_schedule, surgeon_schedule, anesthesia_schedule
                         )
-                        # Stratejinin ceza çarpanını uygula
                         total_schedule_penalty += int(penalty * strat['penalty_multiplier'])
                         assigned_operations.append({
                             'operation': op,
@@ -272,13 +246,9 @@ class ScheduleOptimizer:
                         })
                     else:
                         unassigned_operations.append(op)
-                        # Stratejiye özel atanamama cezası
                         total_schedule_penalty += strat['unassigned_penalty']
 
-                # Skor skalası ölçeklendirmesi
-                max_penalty_limit = 250
-                fitness_score = calculate_fitness_percentage(total_schedule_penalty,
-                                                             max_tolerable_penalty=max_penalty_limit)
+                fitness_score = calculate_fitness_percentage(total_schedule_penalty, max_tolerable_penalty=ALTERNATIVE_MAX_PENALTY_LIMIT)
 
                 candidates.append({
                     'candidate_id': i + 1,
@@ -313,7 +283,6 @@ class ScheduleOptimizer:
                 'schedules': default_res['schedules']
             })
 
-        # Skorları en yüksekten en düşüğe sırala
         candidates.sort(key=lambda x: x['fitness_score'], reverse=True)
 
         return {

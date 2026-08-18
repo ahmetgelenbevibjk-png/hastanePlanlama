@@ -8,49 +8,75 @@ from patient_operation.models import PatientOperation as Operation
 from room.models import OperatingRoom
 from surgeon.models import Surgeon
 from anesthesia.models import AnesthesiaTeam
+
 from .optimizer import ScheduleOptimizer
+from .constants import (
+    DEFAULT_TOTAL_SLOTS,
+    DEFAULT_NUM_CANDIDATES,
+    DEFAULT_FALLBACK_DAY,
+    DAYS_TR
+)
 
 
 class ScheduleOptimizeView(APIView):
 
+    def _extract_day_name(self, selected_date, fallback_day):
+        if not selected_date:
+            return fallback_day
+
+        if isinstance(selected_date, dict):
+            date_str = selected_date.get('date') or selected_date.get('formatted') or str(selected_date)
+        else:
+            date_str = str(selected_date)
+
+        if not date_str or date_str == 'None':
+            return fallback_day
+
+        if 'T' in date_str:
+            date_str = date_str.split('T')[0]
+
+        for fmt in ('%d.%m.%Y', '%Y-%m-%d'):
+            try:
+                date_obj = datetime.strptime(date_str, fmt)
+                return DAYS_TR[date_obj.weekday()]
+            except ValueError:
+                continue
+
+        return fallback_day
+
+    def _format_assigned_list(self, assigned_list):
+        formatted = []
+        for item in assigned_list:
+            op = item['operation']
+            room = item['room']
+            surgeon = item['surgeon']
+            anesthesia = item['anesthesia']
+            start_slot = item['start_slot']
+
+            formatted.append({
+                'operation_id': getattr(op, 'id', None),
+                'patient_name': getattr(op, 'patient_name', f"Hasta #{getattr(op, 'id', '')}"),
+                'operation_name': getattr(op, 'operation_name', 'Ameliyat'),
+                'priority': getattr(op, 'priority', 'NORMAL'),
+                'start_slot': start_slot,
+                'duration_slot': getattr(op, 'duration_slot', 1),
+                'penalty': item.get('penalty', 0),
+                'room_id': getattr(room, 'id', None) if room else None,
+                'room_name': getattr(room, 'name', f"OR-{getattr(room, 'id', '')}") if room else "Salon Yok",
+                'surgeon_id': getattr(surgeon, 'id', None) if surgeon else None,
+                'surgeon_name': getattr(surgeon, 'name', getattr(surgeon, 'full_name', f"Dr. {getattr(surgeon, 'id', '')}")) if surgeon else "Cerrah Yok",
+                'anesthesia_id': getattr(anesthesia, 'id', None) if anesthesia else None,
+                'anesthesia_name': getattr(anesthesia, 'name', getattr(anesthesia, 'team_name', f"Ekip {getattr(anesthesia, 'id', '')}")) if anesthesia else "Ekip Yok"
+            })
+        return formatted
+
     def post(self, request):
         selected_date = request.data.get('date')
-        day_name = request.data.get('day_name')
+        input_day_name = request.data.get('day_name')
 
-        # Tarih formatı kontrolü
-        if isinstance(selected_date, dict):
-            selected_date_str = selected_date.get('date') or selected_date.get('formatted') or str(selected_date)
-        else:
-            selected_date_str = str(selected_date) if selected_date else None
+        day_name = input_day_name or self._extract_day_name(selected_date, DEFAULT_FALLBACK_DAY)
 
-        DAYS_TR = {
-            0: 'Pazartesi', 1: 'Salı', 2: 'Çarşamba', 3: 'Perşembe',
-            4: 'Cuma', 5: 'Cumartesi', 6: 'Pazar'
-        }
-
-        if selected_date_str and selected_date_str != 'None':
-            try:
-                if 'T' in selected_date_str:
-                    selected_date_str = selected_date_str.split('T')[0]
-
-                if '.' in selected_date_str:
-                    date_obj = datetime.strptime(selected_date_str, '%d.%m.%Y')
-                elif '-' in selected_date_str:
-                    date_obj = datetime.strptime(selected_date_str, '%Y-%m-%d')
-                else:
-                    date_obj = None
-
-                if date_obj:
-                    day_name = DAYS_TR[date_obj.weekday()]
-            except (ValueError, TypeError):
-                pass
-
-        if not day_name:
-            day_name = 'Perşembe'
-
-        # Tüm aktif operasyonları alıyoruz
         all_operations = list(Operation.objects.filter(is_active=True))
-
         if not all_operations:
             return Response(
                 {"message": "Sistemde hiç aktif operasyon bulunamadı."},
@@ -65,8 +91,6 @@ class ScheduleOptimizeView(APIView):
             op.surgeon = None
             op.anesthesia = None
 
-        pending_operations = all_operations
-
         rooms = list(OperatingRoom.objects.filter(is_active=True))
         surgeons = list(
             Surgeon.objects.filter(is_active=True)
@@ -79,15 +103,14 @@ class ScheduleOptimizeView(APIView):
             else AnesthesiaTeam.objects.all()
         )
 
-        # 5 farklı alternatif plan simüle ediliyor
-        optimizer = ScheduleOptimizer(total_slots=20)
+        optimizer = ScheduleOptimizer(total_slots=DEFAULT_TOTAL_SLOTS)
         results = optimizer.optimize_with_alternatives(
-            operations=pending_operations,
+            operations=all_operations,
             rooms=rooms,
             surgeons=surgeons,
             anesthesias=anesthesias,
             day_name=day_name,
-            num_candidates=5
+            num_candidates=DEFAULT_NUM_CANDIDATES
         )
 
         best_plan = results['best_plan']
@@ -103,58 +126,30 @@ class ScheduleOptimizeView(APIView):
                     op.anesthesia = item['anesthesia']
                     op.is_scheduled = True
 
-                    if hasattr(op, 'scheduled_date') and selected_date_str:
-                        op.scheduled_date = selected_date_str
+                    if hasattr(op, 'scheduled_date') and selected_date:
+                        op.scheduled_date = selected_date
 
                     op.save()
         except Exception as e:
-            print("Veritabanına kayıt hatası:", str(e))
             return Response(
                 {"message": f"Planlama yapıldı ancak veritabanına kaydedilemedi: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-        # ORM nesnelerini JSON'a uygun sözlüklere dönüştüren yardımcı fonksiyon
-        def format_assigned_list(assigned_list):
-            formatted = []
-            for item in assigned_list:
-                op = item['operation']
-                room = item['room']
-                surgeon = item['surgeon']
-                anesthesia = item['anesthesia']
-                start_slot = item['start_slot']
-
-                formatted.append({
-                    'operation_id': getattr(op, 'id', None),
-                    'patient_name': getattr(op, 'patient_name', f"Hasta #{getattr(op, 'id', '')}"),
-                    'operation_name': getattr(op, 'operation_name', 'Ameliyat'),
-                    'priority': getattr(op, 'priority', 'NORMAL'),
-                    'start_slot': start_slot,
-                    'duration_slot': getattr(op, 'duration_slot', 1),
-                    'penalty': item.get('penalty', 0),
-                    'room_id': getattr(room, 'id', None) if room else None,
-                    'room_name': getattr(room, 'name', f"OR-{getattr(room, 'id', '')}") if room else "Salon Yok",
-                    'surgeon_id': getattr(surgeon, 'id', None) if surgeon else None,
-                    'surgeon_name': getattr(surgeon, 'name', getattr(surgeon, 'full_name', f"Dr. {getattr(surgeon, 'id', '')}")) if surgeon else "Cerrah Yok",
-                    'anesthesia_id': getattr(anesthesia, 'id', None) if anesthesia else None,
-                    'anesthesia_name': getattr(anesthesia, 'name', getattr(anesthesia, 'team_name', f"Ekip {getattr(anesthesia, 'id', '')}")) if anesthesia else "Ekip Yok"
-                })
-            return formatted
-
-        # Aday senaryoları JSON serileştirmeye uygun hale getirme
-        formatted_candidates = []
-        for c in results['all_candidates']:
-            formatted_candidates.append({
+        formatted_candidates = [
+            {
                 'id': c['candidate_id'],
                 'name': c['strategy_name'],
                 'fitness_score': c['fitness_score'],
                 'total_penalty': c['total_penalty'],
                 'assigned_count': c['assigned_count'],
                 'unassigned_count': c['unassigned_count'],
-                'assigned': format_assigned_list(c['assigned'])
-            })
+                'assigned': self._format_assigned_list(c['assigned'])
+            }
+            for c in results['all_candidates']
+        ]
 
-        formatted_assigned = format_assigned_list(best_plan['assigned'])
+        formatted_assigned = self._format_assigned_list(best_plan['assigned'])
 
         formatted_unassigned = [
             {

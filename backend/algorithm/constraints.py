@@ -1,24 +1,28 @@
-def check_slot_bounds(start_slot,duration_slot,total_slots=20):
-    return(start_slot+duration_slot)<=total_slots
+from .constants import DEFAULT_TOTAL_SLOTS, SPECIAL_ROOM_MAPPING, DAY_MAPPING
 
-def is_surgeon_available_on_day(surgeon,day_name):
 
-    if not surgeon.off_day:
+def check_slot_bounds(start_slot, duration_slot, total_slots=DEFAULT_TOTAL_SLOTS):
+    return (start_slot + duration_slot) <= total_slots
+
+
+def is_surgeon_available_on_day(surgeon, day_name):
+    off_day = getattr(surgeon, 'off_day', None)
+    if not off_day:
         return True
-    return surgeon.off_day.strip().lower() !=day_name.strip().lower()
 
-SPECIAL_ROOM_MAPPING= {
-    'Genel Cerrahi':'OR-1',
-    'Kardiyoloji':'OR-2',
-    'Beyin Cerrahisi':'OR-4',
-    'Ortopedi':'OR-3'
-                      }
+    off_day_clean = str(off_day).strip().lower()
+    day_tr_clean = str(day_name).strip().lower()
+    day_en_clean = DAY_MAPPING.get(day_name, '').lower()
 
-def is_specialty_matching(surgeon,operation):
-    return surgeon.specialty==operation.required_specialty
+    return off_day_clean not in (day_tr_clean, day_en_clean)
 
-def is_room_compatible(room,operation):
-    required_room_name=SPECIAL_ROOM_MAPPING.get(getattr(operation,'required_specialty',''))
+
+def is_specialty_matching(surgeon, operation):
+    return surgeon.specialty == operation.required_specialty
+
+
+def is_room_compatible(room, operation):
+    required_room_name = SPECIAL_ROOM_MAPPING.get(getattr(operation, 'required_specialty', ''))
 
     if required_room_name and room.name != required_room_name:
         return False
@@ -28,45 +32,31 @@ def is_room_compatible(room,operation):
 
     return True
 
-def is_resource_free(resource_schedule,resource_id,start_slot,duration_slot):
 
-    slots=resource_schedule.get(resource_id,[])
+def is_resource_free(resource_schedule, resource_id, start_slot, duration_slot):
+    slots = resource_schedule.get(resource_id, [])
     for offset in range(duration_slot):
-        curr_slot=start_slot+offset
+        curr_slot = start_slot + offset
 
-        if curr_slot >=len(slots)or slots[curr_slot] is not None:
+        if curr_slot >= len(slots) or slots[curr_slot] is not None:
             return False
 
     return True
 
 
-def can_assign_operation(operation,surgeon,room,anesthesia,start_slot,day_name,
-                         room_schedule,surgeon_schedule,anesthesia_schedule,total_slots=20):
-    day_mapping = {
-        'Pazartesi': 'monday',
-        'Salı': 'tuesday',
-        'Çarşamba': 'wednesday',
-        'Perşembe': 'thursday',
-        'Cuma': 'friday',
-        'Cumartesi': 'saturday',
-        'Pazar': 'sunday'
-    }
-
-    current_day_key = day_mapping.get(day_name, '')
-    if getattr(surgeon, 'off_day', None) and surgeon.off_day == current_day_key:
+def can_assign_operation(operation, surgeon, room, anesthesia, start_slot, day_name,
+                         room_schedule, surgeon_schedule, anesthesia_schedule,
+                         total_slots=DEFAULT_TOTAL_SLOTS):
+    if not check_slot_bounds(start_slot, operation.duration_slot, total_slots):
         return False
 
-
-    if not check_slot_bounds(start_slot,operation.duration_slot,total_slots):
+    if not is_surgeon_available_on_day(surgeon, day_name):
         return False
 
-    if not is_surgeon_available_on_day(surgeon,day_name):
+    if not is_specialty_matching(surgeon, operation):
         return False
 
-    if not is_specialty_matching(surgeon,operation):
-        return False
-
-    if not is_room_compatible(room,operation):
+    if not is_room_compatible(room, operation):
         return False
 
     if not is_resource_free(room_schedule, room.id, start_slot, operation.duration_slot):
