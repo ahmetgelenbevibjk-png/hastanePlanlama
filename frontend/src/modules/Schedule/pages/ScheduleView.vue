@@ -19,6 +19,16 @@
           />
         </div>
 
+        <!-- Alternatif Planlar Modalı Açma Butonu -->
+        <button
+          v-if="candidatePlans.length > 0"
+          @click="isCandidatesModalOpen = true"
+          class="btn-results"
+          type="button"
+        >
+          📊 Alternatif Planlar ({{ candidatePlans.length }})
+        </button>
+
         <!-- Planlama Çalıştır Butonu -->
         <button
           @click="runOptimizer"
@@ -53,14 +63,6 @@
       </div>
     </div>
 
-    <!-- Denenen Alternatif Planlar Paneli -->
-    <CandidatePlansPanel
-      v-if="candidatePlans.length > 0"
-      :candidates="candidatePlans"
-      :selected-plan-id="selectedPlanId"
-      @select-plan="handleSelectPlan"
-    />
-
     <!-- Ana Çizelge Alanı -->
     <div class="grid-card">
       <div v-if="loading" class="loading-state">Çizelge yükleniyor...</div>
@@ -75,14 +77,23 @@
       />
     </div>
 
-    <!-- Ameliyat Detay Modalı -->
+    <!-- Aday Planlar Modalı Component -->
+    <CandidatesModal
+      :is-open="isCandidatesModalOpen"
+      :candidates="candidatePlans"
+      :selected-candidate-id="selectedPlanId"
+      @close="isCandidatesModalOpen = false"
+      @select-plan="handleSelectPlan"
+    />
+
+    <!-- Ameliyat Detay Modalı Component -->
     <OperationDetailModal
-      :is-open="isModalOpen"
+      :is-open="isDetailModalOpen"
       :operation="selectedOp"
       :rooms="rooms"
       :surgeons="surgeons"
       :anesthesia-teams="anesthesiaTeams"
-      @close="closeModal"
+      @close="closeDetailModal"
     />
   </div>
 </template>
@@ -90,7 +101,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import ScheduleGrid from '../components/ScheduleGrid.vue'
-import CandidatePlansPanel from '../components/CandidatePlansPanel.vue'
+import CandidatesModal from '../components/CandidatesModal.vue'
 import OperationDetailModal from '../pages/OperationDetailModal.vue'
 import { ScheduleService } from '../services.js'
 
@@ -107,33 +118,65 @@ const isOptimizing = ref(false)
 const loading = ref(false)
 
 const rooms = ref([])
-const operations = ref([])          // Tüm operasyonlar veya ham liste
-const scheduledOperations = ref([]) // Çizelgeye çizilecek atanmış ameliyatlar
+const operations = ref([])
+const scheduledOperations = ref([])
 const surgeons = ref([])
 const anesthesiaTeams = ref([])
 
-const fitnessScore = ref(null)
-const candidatePlans = ref([])      // Alternatif senaryolar
-const selectedPlanId = ref(null)     // Seçili alternatifin ID'si
+// Başlangıç Skor ve Aday Plan Test Verileri
+const fitnessScore = ref(63.6)
+const selectedPlanId = ref(1)
 
-const isModalOpen = ref(false)
+const candidatePlans = ref([
+  {
+    candidate_id: 1,
+    strategy_name: "Öncelik Odaklı Senaryo",
+    fitness_score: 63.6,
+    assigned_count: 7,
+    unassigned_count: 0,
+    total_penalty: 36.4,
+    penalties: [
+      { reason: "HIGH Öncelikli Vaka (P1) Geciktirildi", points: 15 },
+      { reason: "08:00 - 09:30 OR-1 Salon Atıl Süresi", points: 11.4 },
+      { reason: "Team-B Ekibinin Dinlenmesiz Ameliyat Dizilimi", points: 10 }
+    ]
+  },
+  {
+    candidate_id: 2,
+    strategy_name: "Erken Başlangıç Senaryosu",
+    fitness_score: 79.0,
+    assigned_count: 7,
+    unassigned_count: 0,
+    total_penalty: 21.0,
+    penalties: [
+      { reason: "08:00 Slotunda OR-4 Salonu Atıl Kaldı", points: 11.0 },
+      { reason: "Ekip Turnaround Süre Aşımı", points: 10.0 }
+    ]
+  }
+])
+
+// Modal Durum Kontrolleri
+const isCandidatesModalOpen = ref(false)
+const isDetailModalOpen = ref(false)
 const selectedOp = ref(null)
 
 const handleSelectOperation = (op) => {
   selectedOp.value = op
-  isModalOpen.value = true
+  isDetailModalOpen.value = true
 }
 
-const closeModal = () => {
-  isModalOpen.value = false
+const closeDetailModal = () => {
+  isDetailModalOpen.value = false
   selectedOp.value = null
 }
 
-// Alternatif Plan Seçimi Yapıldığında Çalışır
+// Alternatif Plan Seçildiğinde Çizelgeyi Günceller
 const handleSelectPlan = (plan) => {
-  selectedPlanId.value = plan.id
+  selectedPlanId.value = plan.candidate_id || plan.id
   fitnessScore.value = plan.fitness_score
-  scheduledOperations.value = plan.assigned
+  if (plan.assigned && plan.assigned.length > 0) {
+    scheduledOperations.value = plan.assigned
+  }
 }
 
 const fitnessColorClass = computed(() => {
@@ -165,7 +208,6 @@ const fetchScheduleData = async () => {
     const allOps = Array.isArray(opRes.data) ? opRes.data : (opRes.data?.results || [])
     operations.value = allOps
 
-    // Veritabanında zaten bir salona/slota atanmış olanları al
     scheduledOperations.value = allOps.filter(op =>
       (op.room_id || op.room) && (op.start_slot !== null && op.start_slot !== undefined)
     )
@@ -203,26 +245,26 @@ const runOptimizer = async () => {
       day_name: dayName
     })
 
-    if (response.data) {
-      if (response.data.fitness_score !== undefined) {
-        fitnessScore.value = response.data.fitness_score
+    const resData = response.data
+    if (resData) {
+      if (resData.best_plan) {
+        fitnessScore.value = resData.best_plan.fitness_score
+        scheduledOperations.value = resData.best_plan.assigned || []
+        selectedPlanId.value = resData.best_plan.candidate_id
+      } else if (resData.fitness_score !== undefined) {
+        fitnessScore.value = resData.fitness_score
+        scheduledOperations.value = resData.assigned || []
       }
 
-      // Varsayılan (En İyi) Planı Çizelgeye Atayalım
-      if (response.data.assigned) {
-        scheduledOperations.value = response.data.assigned
+      const candidatesList = resData.all_candidates || resData.candidates
+      if (candidatesList && candidatesList.length > 0) {
+        candidatePlans.value = candidatesList
       }
 
-      // Backend'den Gelen Alternatif Plan Listesi
-      if (response.data.candidates && response.data.candidates.length > 0) {
-        candidatePlans.value = response.data.candidates
-        selectedPlanId.value = response.data.candidates[0].id // En iyi ilk planı aktif seçili yap
-      }
+      const assignedCount = resData.best_plan?.assigned_count || scheduledOperations.value.length
+      const unassignedCount = resData.best_plan?.unassigned_count || 0
 
-      const assignedCount = response.data.assigned_count || scheduledOperations.value.length
-      const unassignedCount = response.data.unassigned_count || 0
-
-      alert(`Optimizasyon tamamlandı!\n- Toplam Aday Senaryo: ${candidatePlans.value.length}\n- Atanan Operasyon: ${assignedCount}\n- Atanamayan Operasyon: ${unassignedCount}`)
+      alert(`Optimizasyon tamamlandı!\n- Üretilen Alternatif Senaryo: ${candidatePlans.value.length}\n- Atanan Operasyon: ${assignedCount}\n- Atanamayan Operasyon: ${unassignedCount}`)
     }
   } catch (error) {
     console.error('Planlama hatası:', error)
@@ -292,6 +334,24 @@ onMounted(() => {
 .date-input:focus {
   border-color: #2563eb;
 }
+
+.btn-results {
+  background-color: #4f46e5;
+  color: #ffffff;
+  border: none;
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(79, 70, 229, 0.2);
+}
+.btn-results:hover {
+  background-color: #4338ca;
+  transform: translateY(-1px);
+}
+
 .btn-run {
   background-color: #2563eb;
   color: #ffffff;
@@ -340,18 +400,17 @@ onMounted(() => {
   color: #0f172a;
 }
 
-/* Fitness Kartı ve Skor Renk Sınıfları */
 .fitness-card {
   border-left-color: #059669 !important;
 }
 .text-success {
-  color: #059669; /* Yeşil */
+  color: #059669;
 }
 .text-warning {
-  color: #d97706; /* Turuncu */
+  color: #d97706;
 }
 .text-danger {
-  color: #dc2626; /* Kırmızı */
+  color: #dc2626;
 }
 
 .grid-card {
