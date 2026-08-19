@@ -11,27 +11,28 @@ from .constants import (
     DEFAULT_DAY_NAME,
     DEFAULT_NUM_CANDIDATES,
     STRATEGY_CONFIGS,
-    max_tolerable_penalty
+    MAX_TOLERABLE_PENALTY
+    
 )
 
 
-def calculate_fitness_percentage(total_penalty,max_tolerable_penalty):
-
-    if total_penalty >=max_tolerable_penalty:
+def calculate_fitness_percentage(total_penalty, max_tolerable_penalty_val):
+    if total_penalty >= max_tolerable_penalty_val:
         return 0.0
-    fitness = max_tolerable_penalty - total_penalty
+    fitness = max_tolerable_penalty_val - total_penalty
     return round(max(0.0, float(fitness)), 2)
+
 
 class ScheduleOptimizer:
 
-    def __init__(self,total_slots=DEFAULT_TOTAL_SLOTS):
-        self.total_slots=total_slots
+    def __init__(self, total_slots=DEFAULT_TOTAL_SLOTS):
+        self.total_slots = total_slots
 
-    def _get_op_priority(self,op):
-        p=getattr(op,'priority','')
+    def _get_op_priority(self, op):
+        p = getattr(op, 'priority', '')
         if not p:
             return 0
-        return PRIORITY_WEIGHTS.get(str(p).upper(),0)
+        return PRIORITY_WEIGHTS.get(str(p).upper(), 0)
 
     def _get_op_duration(self, op):
         dur = getattr(op, 'duration_slot', None)
@@ -91,7 +92,6 @@ class ScheduleOptimizer:
                                 anesthesia_schedule=anesthesia_schedule,
                                 total_slots=self.total_slots
                         ):
-
 
                             penalty = calculate_assignment_penalty(
                                 operation=operation,
@@ -156,7 +156,7 @@ class ScheduleOptimizer:
             if op_data['penalty'] == 0:
                 continue
 
-                # Operasyonu geçici olarak çizelgeden çıkar
+            # Operasyonu geçici olarak çizelgeden çıkar
             self.remove_operation_from_schedule(
                 op_data['operation'], op_data['start_slot'], op_data['room'],
                 op_data['surgeon'], op_data['anesthesia'],
@@ -193,40 +193,42 @@ class ScheduleOptimizer:
                     room_schedule, surgeon_schedule, anesthesia_schedule
                 )
 
-            return assigned_operations
+        return assigned_operations
 
-    def optimize_with_alternatives(self, operations, rooms, surgeons, anesthesias, day_name=DEFAULT_DAY_NAME,
+    def optimize_with_alternatives(self,operations,rooms,surgeons,anesthesias,day_name=DEFAULT_DAY_NAME,
                                    num_candidates=DEFAULT_NUM_CANDIDATES):
-        candidates = []
-
-        strategies = [
-            {**STRATEGY_CONFIGS[0], 'sort': lambda ops: self.sort_operations_by_priority(ops)},
-            {**STRATEGY_CONFIGS[1], 'sort': lambda ops: sorted(ops, key=lambda op: (
+        candidates=[]
+        
+        strategies= [
+            
+            {    **STRATEGY_CONFIGS[0],'sort': lambda ops:self.sort_operations_by_priority(ops)},
+            {**STRATEGY_CONFIGS[1],'sort':lambda ops:sorted(ops,key=lambda op:(
                 self._get_op_priority(op) >= HIGH_PRIORITY_THRESHOLD, self._get_op_priority(op)), reverse=True)},
             {**STRATEGY_CONFIGS[2],
              'sort': lambda ops: sorted(ops, key=lambda op: self._get_op_duration(op), reverse=True)},
             {**STRATEGY_CONFIGS[3],
-             'sort': lambda ops: sorted(ops, key=lambda op: -self._get_op_duration(op), reverse=True)},
+             'sort': lambda ops: sorted(ops, key=lambda op: self._get_op_duration(op))},
             {**STRATEGY_CONFIGS[4], 'sort': lambda ops: sorted(ops, key=lambda op: (
-                getattr(getattr(op, 'surgeon', None), 'id', 0), self._get_op_priority(op)), reverse=True)}
+                getattr(getattr(op, 'surgeon', None), 'id', op.surgeon if hasattr(op, 'surgeon') else 0),
+                self._get_op_priority(op)
+            ), reverse=True)}
         ]
-
-        for i in range(num_candidates):
-            strat = strategies[i % len(strategies)]
-            sorted_ops = strat['sort'](operations)
-
-            room_schedule, surgeon_schedule, anesthesia_schedule = self.initialize_schedules(rooms, surgeons,
-                                                                                             anesthesias)
-            assigned_operations = []
-            unassigned_operations = []
-
+        
+        for i,strat in enumerate(strategies):
+            sorted_ops=strat['sort'](operations)
+            
+            room_schedule,surgeon_schedule,anesthesia_schedule = self.initialize_schedules(
+                rooms,surgeons,anesthesias 
+            )
+            assigned_operations= []
+            unassigned_operations=[]
+            
             for op in sorted_ops:
                 slot, room, surgeon, anesthesia, penalty = self.find_best_slot_for_operation(
                     operation=op, rooms=rooms, surgeons=surgeons, anesthesias=anesthesias,
                     day_name=day_name, room_schedule=room_schedule,
                     surgeon_schedule=surgeon_schedule, anesthesia_schedule=anesthesia_schedule
                 )
-
                 if slot is not None:
                     self.assign_operation_to_schedule(
                         op, slot, room, surgeon, anesthesia,
@@ -244,16 +246,39 @@ class ScheduleOptimizer:
                 room_schedule, surgeon_schedule, anesthesia_schedule
             )
 
-            total_schedule_penalty = sum(item['penalty'] * strat['penalty_multiplier'] for item in assigned_operations)
-            total_schedule_penalty += len(unassigned_operations) * strat['unassigned_penalty']
+            penalties_breakdown = []
+            penalty_mult = strat.get('penalty_multiplier', 1.0)
+            unassigned_pen = strat.get('unassigned_penalty', DEFAULT_UNASSIGNED_PENALTY)
 
-            fitness_score = calculate_fitness_percentage(total_schedule_penalty, max_tolerable_penalty=ALTERNATIVE_MAX_PENALTY_LIMIT)
+            for item in assigned_operations:
+                if item['penalty'] > 0:
+                    op_name = getattr(item['operation'], 'operation_name', f"Ameliyat #{getattr(item['operation'], 'id', '')}")
+                    penalties_breakdown.append({
+                        'reason': f"{op_name} kısıt/uyumsuzluk puanı",
+                        'points': round(item['penalty'] * penalty_mult, 2)
+                    })
 
-            candidates.append({
+            for op in unassigned_operations:
+                op_name = getattr(op, 'operation_name', f"Ameliyat #{getattr(op, 'id', '')}")
+                penalties_breakdown.append({
+                    'reason': f"{op_name} uygun alan bulunamadığı için atanamadı",
+                    'points': round(unassigned_pen, 2)
+                })
+
+            total_schedule_penalty = sum(item['penalty'] * penalty_mult for item in assigned_operations)
+            total_schedule_penalty += len(unassigned_operations) * unassigned_pen
+
+            fitness_score = calculate_fitness_percentage(
+                total_schedule_penalty,
+                max_tolerable_penalty_val=ALTERNATIVE_MAX_PENALTY_LIMIT
+            )
+
+            candidate = {
                 'candidate_id': i + 1,
                 'strategy_name': strat['name'],
                 'fitness_score': fitness_score,
                 'total_penalty': total_schedule_penalty,
+                'penalties': penalties_breakdown,
                 'assigned_count': len(assigned_operations),
                 'unassigned_count': len(unassigned_operations),
                 'assigned': assigned_operations,
@@ -263,11 +288,17 @@ class ScheduleOptimizer:
                     'surgeon': surgeon_schedule,
                     'anesthesia': anesthesia_schedule
                 }
-            })
+            }
+            candidates.append(candidate)
+
+            # DEĞİŞİKLİK 2: Erken Çıkış (Erken Bitirme) Şartı
+            # Sırayla denerken kusursuz planı (0 ceza ve 0 açıkta ameliyat) bulduğu an kalan turları iptal eder.
+            if total_schedule_penalty == 0 and len(unassigned_operations) == 0:
+                break
 
         candidates.sort(key=lambda x: x['fitness_score'], reverse=True)
 
         return {
-            'best_plan': candidates[0],
+            'best_plan': candidates[0] if candidates else None,
             'all_candidates': candidates
         }

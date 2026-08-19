@@ -1,5 +1,6 @@
 <template>
   <div class="schedule-grid-container">
+    
     <div class="table-wrapper">
       <table class="timeline-table">
         <thead>

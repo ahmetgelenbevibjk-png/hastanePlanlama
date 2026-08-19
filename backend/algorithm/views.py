@@ -16,6 +16,8 @@ from .constants import (
     DEFAULT_FALLBACK_DAY,
     DAYS_TR
 )
+from .constraints import can_assign_operation 
+from .penalties import calculate_assignment_penalty 
 
 
 class ScheduleOptimizeView(APIView):
@@ -83,7 +85,6 @@ class ScheduleOptimizeView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Mevcut atamaları bellekte sıfırla
         for op in all_operations:
             op.is_scheduled = False
             op.room = None
@@ -172,3 +173,101 @@ class ScheduleOptimizeView(APIView):
             'unassigned': formatted_unassigned,
             'candidates': formatted_candidates
         }, status=status.HTTP_200_OK)
+        
+        
+class ManualScheduleUpdateView(APIView):
+
+    def post(self, request):
+        data = request.data
+
+        operation_id = data.get('operation_id')
+        target_slot = data.get('target_slot')
+        target_room_id = data.get('target_room_id')
+        day_name = data.get('day_name', 'Pazartesi')
+
+        if not all([operation_id, target_room_id, target_slot is not None]):
+            return Response(
+                {
+                    'success': False,
+                    'message': 'Eksik parametre gönderildi.',
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 1. Veritabanından Nesneleri Çek
+        try:
+            operation = Operation.objects.get(id=operation_id)
+            room = Room.objects.get(id=target_room_id)
+            surgeon = operation.surgeon  # Ameliyata bağlı mevcut cerrah
+            anesthesia = (
+                operation.anesthesia_team
+            )  # Ameliyata bağlı anestezi ekibi
+        except (
+            Operation.DoesNotExist,
+            Room.DoesNotExist,
+        ):
+            return Response(
+                {
+                    'success': False,
+                    'message': 'Geçersiz ameliyat veya salon ID!',
+                },
+                status=status.HTTP_44_NOT_FOUND,
+            )
+
+        # 2. Mevcut Program Durumlarını (Schedule) DB veya Cache'den Oluştur/Çek
+        # (Bu yapı projendeki çakışma kontrolü mantığına göre dinamik çekilmelidir)
+        room_schedule = data.get('room_schedule', {})
+        surgeon_schedule = data.get('surgeon_schedule', {})
+        anesthesia_schedule = data.get('anesthesia_schedule', {})
+
+        # 3. Uygunluk Kontrolü
+        is_valid = can_assign_operation(
+            operation=operation,
+            surgeon=surgeon,
+            room=room,
+            anesthesia=anesthesia,
+            start_slot=target_slot,
+            day_name=day_name,
+            room_schedule=room_schedule,
+            surgeon_schedule=surgeon_schedule,
+            anesthesia_schedule=anesthesia_schedule,
+        )
+
+        if not is_valid:
+            return Response(
+                {
+                    'success': False,
+                    'message': (
+                        'Seçilen salon veya saat dilimi uygun değil!'
+                        ' Çakışma veya izin günü engeli var.'
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 4. Veritabanını Güncelle ve Kaydet
+        operation.room = room
+        operation.start_slot = target_slot
+        operation.save()
+
+        # 5. Yeni Ceza / Maliyet Hesaplama
+        new_penalty = calculate_assignment_penalty(
+            operation=operation,
+            surgeon=surgeon,
+            room=room,
+            anesthesia=anesthesia,
+            start_slot=target_slot,
+            room_schedule=room_schedule,
+            surgeon_schedule=surgeon_schedule,
+        )
+
+        return Response(
+            {
+                'success': True,
+                'message': 'Ameliyat yeri başarıyla güncellendi.',
+                'target_slot': target_slot,
+                'target_room_id': target_room_id,
+                'new_penalty': new_penalty,
+            },
+            status=status.HTTP_200_OK,
+        )
