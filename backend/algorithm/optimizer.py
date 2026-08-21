@@ -1,304 +1,210 @@
-from .constraints import can_assign_operation
-from .penalties import calculate_assignment_penalty
+import copy
+import random 
+
+from.constraints import can_assign_operation 
+from .penalties import calculate_assignment_penalty 
 from .constants import (
-    PRIORITY_WEIGHTS,
     DEFAULT_TOTAL_SLOTS,
-    SLOT_DURATION_MINUTES,
     DEFAULT_UNASSIGNED_PENALTY,
-    DEFAULT_MAX_PENALTY_LIMIT,
     ALTERNATIVE_MAX_PENALTY_LIMIT,
-    HIGH_PRIORITY_THRESHOLD,
     DEFAULT_DAY_NAME,
     DEFAULT_NUM_CANDIDATES,
-    STRATEGY_CONFIGS,
-    MAX_TOLERABLE_PENALTY
+    GA_POPULATION_SIZE,
+    GA_GENERATIONS,
+    GA_MUTATION_RATE,
+    GA_TOURNAMENT_SIZE,
+    GA_ELITISM_RATE,
     
 )
 
-
-def calculate_fitness_percentage(total_penalty, max_tolerable_penalty_val):
-    if total_penalty >= max_tolerable_penalty_val:
-        return 0.0
-    fitness = max_tolerable_penalty_val - total_penalty
-    return round(max(0.0, float(fitness)), 2)
-
-
 class ScheduleOptimizer:
-
-    def __init__(self, total_slots=DEFAULT_TOTAL_SLOTS):
-        self.total_slots = total_slots
-
-    def _get_op_priority(self, op):
-        p = getattr(op, 'priority', '')
-        if not p:
-            return 0
-        return PRIORITY_WEIGHTS.get(str(p).upper(), 0)
-
-    def _get_op_duration(self, op):
-        dur = getattr(op, 'duration_slot', None)
-        if dur is not None:
-            return int(dur)
-        raw_dur = getattr(op, 'duration', None)
-        if raw_dur is not None:
-            return max(1, int(raw_dur) // SLOT_DURATION_MINUTES)
-        return 1
-
-    def sort_operations_by_priority(self, operations):
-        return sorted(
-            operations,
-            key=lambda op: self._get_op_priority(op),
-            reverse=True
-        )
-
-    def initialize_schedules(self, rooms, surgeons, anesthesias, pre_assigned_operations=None):
-        room_schedule = {r.id if hasattr(r, 'id') else r: [None] * self.total_slots for r in rooms}
-        surgeon_schedule = {s.id if hasattr(s, 'id') else s: [None] * self.total_slots for s in surgeons}
-        anesthesia_schedule = {a.id if hasattr(a, 'id') else a: [None] * self.total_slots for a in anesthesias}
-
-        if pre_assigned_operations:
-            for op in pre_assigned_operations:
-                self.assign_operation_to_schedule(
-                    operation=op,
-                    slot=getattr(op, 'start_slot', 0),
-                    room=getattr(op, 'room', None),
-                    surgeon=getattr(op, 'surgeon', None),
-                    anesthesia=getattr(op, 'anesthesia', None),
-                    room_schedule=room_schedule,
-                    surgeon_schedule=surgeon_schedule,
-                    anesthesia_schedule=anesthesia_schedule
-                )
-        return room_schedule, surgeon_schedule, anesthesia_schedule
-
-    def find_best_slot_for_operation(self, operation, rooms, surgeons, anesthesias, day_name,
-                                     room_schedule, surgeon_schedule, anesthesia_schedule):
-
-        best_option = None
-        lowest_penalty = float('inf')
-
+    def __init__(self,total_slots=DEFAULT_TOTAL_SLOTS):
+        self.total_slots=total_slots 
+        
+    def _init_schedules(self,rooms,surgeons,anesthesias):
+        room_sched={getattr(r,'id',r):[None] * self.total_slots for r in rooms}
+        surgeon_sched = {getattr(s, 'id', s): [None] * self.total_slots for s in surgeons}
+        anesthesia_sched = {getattr(a, 'id', a): [None] * self.total_slots for a in anesthesias}
+        return room_sched, surgeon_sched, anesthesia_sched 
+    
+    def _find_best_slot(self,op,rooms,surgeons,anesthesias,day_name,r_sched,s_sched,a_sched):
+        
+        best_option=None 
+        min_penalty =float('inf')
+        
         for slot in range(self.total_slots):
             for room in rooms:
                 for surgeon in surgeons:
                     for anesthesia in anesthesias:
-
-                        if can_assign_operation(
-                                operation=operation,
-                                surgeon=surgeon,
-                                room=room,
-                                anesthesia=anesthesia,
-                                start_slot=slot,
-                                day_name=day_name,
-                                room_schedule=room_schedule,
-                                surgeon_schedule=surgeon_schedule,
-                                anesthesia_schedule=anesthesia_schedule,
-                                total_slots=self.total_slots
-                        ):
-
-                            penalty = calculate_assignment_penalty(
-                                operation=operation,
-                                surgeon=surgeon,
-                                room=room,
-                                anesthesia=anesthesia,
-                                start_slot=slot,
-                                room_schedule=room_schedule,
-                                surgeon_schedule=surgeon_schedule
-                            )
-
-                            if penalty < lowest_penalty:
-                                lowest_penalty = penalty
-                                best_option = (slot, room, surgeon, anesthesia, penalty)
-
-                                if penalty == 0:
-                                    return slot, room, surgeon, anesthesia, penalty
-
-        if best_option:
-            return best_option
-        return None, None, None, None, None
-
-    def assign_operation_to_schedule(self, operation, slot, room, surgeon, anesthesia,
-                                     room_schedule, surgeon_schedule, anesthesia_schedule):
-        if not all([room, surgeon, anesthesia]):
-            return
-
-        duration = self._get_op_duration(operation)
-        room_id = room.id if hasattr(room, 'id') else room
-        surgeon_id = surgeon.id if hasattr(surgeon, 'id') else surgeon
-        anesthesia_id = anesthesia.id if hasattr(anesthesia, 'id') else anesthesia
-        op_id = operation.id if hasattr(operation, 'id') else operation
-
-        for offset in range(duration):
-            curr_slot = slot + offset
-            if curr_slot < self.total_slots:
-                room_schedule[room_id][curr_slot] = op_id
-                surgeon_schedule[surgeon_id][curr_slot] = op_id
-                anesthesia_schedule[anesthesia_id][curr_slot] = op_id
-
-    def remove_operation_from_schedule(self, operation, slot, room, surgeon, anesthesia,
-                                       room_schedule, surgeon_schedule, anesthesia_schedule):
-        duration = self._get_op_duration(operation)
-        room_id = room.id if hasattr(room, 'id') else room
-        surgeon_id = surgeon.id if hasattr(surgeon, 'id') else surgeon
-        anesthesia_id = anesthesia.id if hasattr(anesthesia, 'id') else anesthesia
-
-        for offset in range(duration):
-            curr_slot = slot + offset
-            if curr_slot < self.total_slots:
-                room_schedule[room_id][curr_slot] = None
-                surgeon_schedule[surgeon_id][curr_slot] = None
-                anesthesia_schedule[anesthesia_id][curr_slot] = None
-
-    def _apply_local_search(self, assigned_operations, rooms, surgeons, anesthesias, day_name,
-                            room_schedule, surgeon_schedule, anesthesia_schedule):
-        assigned_operations.sort(key=lambda x: x['penalty'], reverse=True)
-
-        for i in range(len(assigned_operations)):
-            op_data = assigned_operations[i]
-
-            if op_data['penalty'] == 0:
-                continue
-
-            # Operasyonu geçici olarak çizelgeden çıkar
-            self.remove_operation_from_schedule(
-                op_data['operation'], op_data['start_slot'], op_data['room'],
-                op_data['surgeon'], op_data['anesthesia'],
-                room_schedule, surgeon_schedule, anesthesia_schedule
-            )
-            new_slot, new_room, new_surgeon, new_anes, new_penalty = self.find_best_slot_for_operation(
-                operation=op_data['operation'],
-                rooms=rooms,
-                surgeons=surgeons,
-                anesthesias=anesthesias,
-                day_name=day_name,
-                room_schedule=room_schedule,
-                surgeon_schedule=surgeon_schedule,
-                anesthesia_schedule=anesthesia_schedule
-            )
-
-            if new_slot is not None and new_penalty < op_data['penalty']:
-                self.assign_operation_to_schedule(
-                    op_data['operation'], new_slot, new_room, new_surgeon, new_anes,
-                    room_schedule, surgeon_schedule, anesthesia_schedule
-                )
-                assigned_operations[i] = {
-                    'operation': op_data['operation'],
-                    'start_slot': new_slot,
-                    'room': new_room,
-                    'surgeon': new_surgeon,
-                    'anesthesia': new_anes,
-                    'penalty': new_penalty
-                }
-            else:
-                self.assign_operation_to_schedule(
-                    op_data['operation'], op_data['start_slot'], op_data['room'],
-                    op_data['surgeon'], op_data['anesthesia'],
-                    room_schedule, surgeon_schedule, anesthesia_schedule
-                )
-
-        return assigned_operations
-
-    def optimize_with_alternatives(self,operations,rooms,surgeons,anesthesias,day_name=DEFAULT_DAY_NAME,
-                                   num_candidates=DEFAULT_NUM_CANDIDATES):
-        candidates=[]
+                        
+                        if can_assign_operation(op,surgeon,room,anesthesia, slot,day_name,r_sched,s_sched,a_sched,self.total_slots):
+                            
+                            penalty = calculate_assignment_penalty(op, surgeon, room, anesthesia, slot, r_sched, s_sched)
+                            
+                            if penalty < min_penalty:
+                                min_penalty=penalty 
+                                best_option=(slot,room,surgeon,anesthesia,penalty)
+                                if penalty==0:
+                                    return best_option 
+                                
+        return best_option if best_option else (None,None,None,None,None)
+    
+    
+    def _assign_to_sched(self, op, slot, room, surgeon, anesthesia, r_sched, s_sched, a_sched):
+        r_id = getattr(room, 'id', room)
+        s_id = getattr(surgeon, 'id', surgeon)
+        a_id = getattr(anesthesia, 'id', anesthesia)
+        duration = getattr(op, 'duration_slot', 1)
         
-        strategies= [
+        for offset in range(duration):
+            curr_slot=slot + offset 
+            if curr_slot < self.total_slots:
+                r_sched[r_id][curr_slot] = op.id
+                s_sched[s_id][curr_slot] = op.id
+                a_sched[a_id][curr_slot] = op.id
+                
+                
+    def _decode_chromosome(self, chromosome, rooms, surgeons, anesthesias, day_name):
+        r_sched, s_sched, a_sched = self._init_schedules(rooms, surgeons, anesthesias)
+        assigned, unassigned = [], []
+        
+        for op in chromosome: 
+            slot,room,surgeon,anesthesia,penalty =self._find_best_slot(
+                op,rooms,surgeons,anesthesias,day_name,r_sched,s_sched,a_sched
+            )
+            if slot is not None:
+                self._assign_to_sched(op,slot,room,surgeon,anesthesia,r_sched,s_sched,a_sched)
+                assigned.append({
+                    'operation':op,'start_slot':slot,'room':room,
+                    'surgeon':surgeon,'anesthesia':anesthesia,'penalty':penalty 
+                })
+            else: 
+                unassigned.append(op)
+                
+        total_penalty = sum(x['penalty'] for x in assigned) + (len(unassigned) * DEFAULT_UNASSIGNED_PENALTY)
+        
+        fitness = max(0.0, float(ALTERNATIVE_MAX_PENALTY_LIMIT - total_penalty))
+        
+        return {
+            'chromosome':chromosome,
+            'fitness_score':round(fitness,2),
+            'total_penalty':total_penalty,
+            'assigned':assigned,
+            'unassigned':unassigned,
+            'schedules': {'room':r_sched,'surgeon':s_sched , 'anesthesia':a_sched}
+        }
+        
+    def _select_parent(self,population):
+        
+        candidates=random.sample(population,min(len(population),GA_TOURNAMENT_SIZE))
+        candidates.sort(key=lambda x: x['fitness_score'], reverse=True)
+        return candidates[0]['chromosome']
+
+    def _crossover(self, parent1, parent2):
+        size = len(parent1)
+        if size < 2:
+            return copy.deepcopy(parent1)
+
+        cx1, cx2 = sorted(random.sample(range(size), 2))
+        child = [None] * size
+        child[cx1:cx2 + 1] = parent1[cx1:cx2 + 1]
+
+        p1_set = set(parent1[cx1:cx2 + 1])
+        p2_remaining = [item for item in parent2 if item not in p1_set]
+
+        idx = 0
+        for i in range(size):
+            if child[i] is None:
+                child[i] = p2_remaining[idx]
+                idx += 1
+        return child
+
+    def _mutate(self, chromosome):
+        mutated = copy.deepcopy(chromosome)
+        if random.random() < GA_MUTATION_RATE and len(mutated) > 1:
+            idx1, idx2 = random.sample(range(len(mutated)), 2)
+            mutated[idx1], mutated[idx2] = mutated[idx2], mutated[idx1]
+        return mutated
+    
+    def optimize_with_alternatives( self,operations,rooms,surgeons,anesthesias, day_name=DEFAULT_DAY_NAME, num_candidates=DEFAULT_NUM_CANDIDATES ):
+        if not operations:
+            return {'best_plan':None,'all_candidates':[]}
+        
+        population= []
+        
+        p_sorted = sorted(operations, key=lambda x: getattr(x, 'priority', ''), reverse=True)
+        d_sorted = sorted(operations, key=lambda x: getattr(x, 'duration_slot', 1), reverse=True)
+        population.extend([p_sorted, d_sorted])
+        
+        while len(population) < GA_POPULATION_SIZE:
+            shuffled=copy.deepcopy(operations)
+            random.shuffle(shuffled)
+            population.append(shuffled)
             
-            {    **STRATEGY_CONFIGS[0],'sort': lambda ops:self.sort_operations_by_priority(ops)},
-            {**STRATEGY_CONFIGS[1],'sort':lambda ops:sorted(ops,key=lambda op:(
-                self._get_op_priority(op) >= HIGH_PRIORITY_THRESHOLD, self._get_op_priority(op)), reverse=True)},
-            {**STRATEGY_CONFIGS[2],
-             'sort': lambda ops: sorted(ops, key=lambda op: self._get_op_duration(op), reverse=True)},
-            {**STRATEGY_CONFIGS[3],
-             'sort': lambda ops: sorted(ops, key=lambda op: self._get_op_duration(op))},
-            {**STRATEGY_CONFIGS[4], 'sort': lambda ops: sorted(ops, key=lambda op: (
-                getattr(getattr(op, 'surgeon', None), 'id', op.surgeon if hasattr(op, 'surgeon') else 0),
-                self._get_op_priority(op)
-            ), reverse=True)}
+        evaluated = [
+            self._decode_chromosome(chrom,rooms,surgeons,anesthesias,day_name)
+            for chrom in population
         ]
         
-        for i,strat in enumerate(strategies):
-            sorted_ops=strat['sort'](operations)
+        for _ in range(GA_GENERATIONS):
+            evaluated.sort(key=lambda x: x['fitness_score'],reverse=True)
+            new_chroms=[]
             
-            room_schedule,surgeon_schedule,anesthesia_schedule = self.initialize_schedules(
-                rooms,surgeons,anesthesias 
-            )
-            assigned_operations= []
-            unassigned_operations=[]
+            elitism_count=max(1,int(GA_POPULATION_SIZE * GA_ELITISM_RATE))
+            for i in range(elitism_count):
+                new_chroms.append(copy.deepcopy(evaluated[i]['chromosome']))
+                
+            while len(new_chroms)< GA_POPULATION_SIZE:
+                p1=self._select_parent(evaluated)
+                p2=self._select_parent(evaluated)
+                child=self._crossover(p1,p2)
+                child=self._mutate(child)
+                new_chroms.append(child)
+                
+            evaluated =[
+                self._decode_chromosome(chrom,rooms,surgeons,anesthesias,day_name)
+                for chrom in new_chroms 
+            ]
             
-            for op in sorted_ops:
-                slot, room, surgeon, anesthesia, penalty = self.find_best_slot_for_operation(
-                    operation=op, rooms=rooms, surgeons=surgeons, anesthesias=anesthesias,
-                    day_name=day_name, room_schedule=room_schedule,
-                    surgeon_schedule=surgeon_schedule, anesthesia_schedule=anesthesia_schedule
-                )
-                if slot is not None:
-                    self.assign_operation_to_schedule(
-                        op, slot, room, surgeon, anesthesia,
-                        room_schedule, surgeon_schedule, anesthesia_schedule
-                    )
-                    assigned_operations.append({
-                        'operation': op, 'start_slot': slot, 'room': room,
-                        'surgeon': surgeon, 'anesthesia': anesthesia, 'penalty': penalty
-                    })
-                else:
-                    unassigned_operations.append(op)
-
-            assigned_operations = self._apply_local_search(
-                assigned_operations, rooms, surgeons, anesthesias, day_name,
-                room_schedule, surgeon_schedule, anesthesia_schedule
-            )
-
-            penalties_breakdown = []
-            penalty_mult = strat.get('penalty_multiplier', 1.0)
-            unassigned_pen = strat.get('unassigned_penalty', DEFAULT_UNASSIGNED_PENALTY)
-
-            for item in assigned_operations:
-                if item['penalty'] > 0:
-                    op_name = getattr(item['operation'], 'operation_name', f"Ameliyat #{getattr(item['operation'], 'id', '')}")
-                    penalties_breakdown.append({
-                        'reason': f"{op_name} kısıt/uyumsuzluk puanı",
-                        'points': round(item['penalty'] * penalty_mult, 2)
-                    })
-
-            for op in unassigned_operations:
-                op_name = getattr(op, 'operation_name', f"Ameliyat #{getattr(op, 'id', '')}")
-                penalties_breakdown.append({
-                    'reason': f"{op_name} uygun alan bulunamadığı için atanamadı",
-                    'points': round(unassigned_pen, 2)
-                })
-
-            total_schedule_penalty = sum(item['penalty'] * penalty_mult for item in assigned_operations)
-            total_schedule_penalty += len(unassigned_operations) * unassigned_pen
-
-            fitness_score = calculate_fitness_percentage(
-                total_schedule_penalty,
-                max_tolerable_penalty_val=ALTERNATIVE_MAX_PENALTY_LIMIT
-            )
-
-            candidate = {
-                'candidate_id': i + 1,
-                'strategy_name': strat['name'],
-                'fitness_score': fitness_score,
-                'total_penalty': total_schedule_penalty,
-                'penalties': penalties_breakdown,
-                'assigned_count': len(assigned_operations),
-                'unassigned_count': len(unassigned_operations),
-                'assigned': assigned_operations,
-                'unassigned': unassigned_operations,
-                'schedules': {
-                    'room': room_schedule,
-                    'surgeon': surgeon_schedule,
-                    'anesthesia': anesthesia_schedule
+        evaluated.sort(key=lambda x: x['fitness_score'], reverse=True)
+        candidates,seen_fingerprints= [],set()
+        
+        for ind in evaluated:
+            fingerprint=tuple(sorted([
+                (item['operation'].id,item['start_slot'],getattr(item['room'],'id',item['room']))
+                for item in ind['assigned']
+            ]))
+            
+            if fingerprint in seen_fingerprints:
+                continue 
+            seen_fingerprints.add(fingerprint)
+            
+            penalties_breakdown=[
+                {
+                    'reason': f"{getattr(item['operation'], 'operation_name', item['operation'].id)} ceza puanı",
+                    'points': round(item['penalty'], 2)
                 }
+                for item in ind['assigned'] if item['penalty']>0
+            ]
+            
+            candidate ={
+                'candidate_id':len(candidates) + 1,
+                'strategy_name':f"Genetik Evrimleşmiş Plan #{len(candidates) +1}",
+                'fitness_score': ind['fitness_score'],
+                'total_penalty':ind['total_penalty'],
+                'penalties':penalties_breakdown,
+                'assigned_count': len(ind['assigned']),
+                'unassigned_count': len(ind['unassigned']),
+                'assigned': ind['assigned'],
+                'unassigned': ind['unassigned'],
+                'schedules': ind['schedules']
             }
             candidates.append(candidate)
-
-            # DEĞİŞİKLİK 2: Erken Çıkış (Erken Bitirme) Şartı
-            # Sırayla denerken kusursuz planı (0 ceza ve 0 açıkta ameliyat) bulduğu an kalan turları iptal eder.
-            if total_schedule_penalty == 0 and len(unassigned_operations) == 0:
-                break
-
-        candidates.sort(key=lambda x: x['fitness_score'], reverse=True)
-
+            
+            if len(candidates)>= num_candidates:
+                break 
+            
         return {
-            'best_plan': candidates[0] if candidates else None,
-            'all_candidates': candidates
+            'best_plan':candidates[0]if candidates else None,
+            'all_candidates':candidates 
         }

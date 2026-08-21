@@ -7,17 +7,17 @@
       <div class="time-column">
         <div class="header-cell">Saat / Slot</div>
         <div 
-          v-for="slot in totalSlots" 
-          :key="slot - 1" 
+          v-for="slot in TIME_SLOTS" 
+          :key="slot.index" 
           class="time-cell"
         >
-          Slot {{ slot - 1 }} ({{ getSlotTime(slot - 1) }})
+          Slot {{ slot.index }} ({{ slot.time }})
         </div>
       </div>
 
       <!-- Ameliyathane Sütunları -->
       <div 
-        v-for="room in rooms" 
+        v-for="room in activeRooms" 
         :key="room.id" 
         class="room-column"
       >
@@ -26,216 +26,240 @@
           {{ room.name }}
         </div>
 
-        <!-- Slot Hücreleri (Sürüklenen Kartların Bırakılacağı Alanlar) -->
-        <div 
-          v-for="slotIdx in totalSlots" 
-          :key="slotIdx - 1" 
-          class="slot-cell"
-          :class="{ 'drag-over': isDragOver(room.id, slotIdx - 1) }"
-          @dragover.prevent="handleDragOver(room.id, slotIdx - 1)"
-          @dragleave="handleDragLeave"
-          @drop="handleDrop($event, room.id, slotIdx - 1)"
-        >
-          <!-- Eğer bu slotta ameliyat varsa kartı çiz -->
-          <div 
-            v-if="getOperationAt(room.id, slotIdx - 1)"
-            class="operation-card"
-            draggable="true"
-            @dragstart="handleDragStart($event, getOperationAt(room.id, slotIdx - 1), room.id, slotIdx - 1)"
-          >
-            <div class="card-header">
-              <strong>{{ getOperationAt(room.id, slotIdx - 1).operation_name }}</strong>
+        <!-- Slot Hücreleri -->
+        <template v-for="slot in TIME_SLOTS" :key="slot.index">
+          <!-- Performans Optimizasyonu: getOperationAt sonucunu op değişkenine sabitledik -->
+          <template v-for="op in [getOperationAt(room.id, slot.index)]" :key="op ? op.id : `empty-${slot.index}`">
+            
+            <!-- 1. Ameliyatın Başladığı Slot (Kart Yüksekliği Süreye Göre Dinamiktir) -->
+            <div 
+              v-if="op"
+              class="slot-cell occupied"
+              :style="{ height: `${(op.duration_slot || 1) * SLOT_HEIGHT_PX}px` }"
+            >
+              <div 
+                class="operation-card"
+                draggable="true"
+                @dragstart="handleDragStart($event, op)"
+              >
+                <div class="card-header">
+                  <strong>{{ op.operation_name || DEFAULT_OPERATION_NAME }}</strong>
+                </div>
+                <div class="card-body">
+                  <span>Cerrah: {{ op.surgeon_name || DEFAULT_SURGEON_NAME }}</span>
+                  <span>Süre: {{ op.duration_slot || 1 }} Slot ({{ (op.duration_slot || 1) * SLOT_DURATION_MINUTES }} dk)</span>
+                </div>
+              </div>
             </div>
-            <div class="card-body">
-              <span>Cerrah: {{ getOperationAt(room.id, slotIdx - 1).surgeon_name }}</span>
-              <span>Süre: {{ getOperationAt(room.id, slotIdx - 1).duration_slot }} Slot</span>
-            </div>
-          </div>
-        </div>
+
+            <!-- 2. Ameliyatın Devam Ettiği Kapalı Slotlar (Çizilmez) -->
+            <template v-else-if="isSlotCoveredByOperation(room.id, slot.index)"></template>
+
+            <!-- 3. Boş Slotlar (Bırakma Alanları) -->
+            <div 
+              v-else
+              class="slot-cell empty"
+              :class="{ 'drag-over': isDragOver(room.id, slot.index) }"
+              @dragover.prevent="handleDragOver(room.id, slot.index)"
+              @dragleave="handleDragLeave"
+              @drop="handleDrop($event, room.id, slot.index)"
+            ></div>
+          </template>
+        </template>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import axios from 'axios'
+import { 
+  TIME_SLOTS, 
+  SLOT_DURATION_MINUTES, 
+  SLOT_HEIGHT_PX,
+  DEFAULT_OPERATION_NAME, 
+  DEFAULT_SURGEON_NAME,
+  MSG_UPDATE_SUCCESS,
+  MSG_UPDATE_ERROR,
+  MANUAL_UPDATE_ENDPOINT,
+  MOCK_ROOMS,
+  MOCK_OPERATIONS
+} from '../constants/scheduleConstants.js'
 
-const totalSlots = ref(20)
-const rooms = ref([
-  { id: 'OR-1', name: 'OR-1 (Genel Cerrahi)' },
-  { id: 'OR-2', name: 'OR-2 (Kardiyoloji)' },
-  { id: 'OR-3', name: 'OR-3 (Ortopedi)' },
-  { id: 'OR-4', name: 'OR-4 (Beyin Cerrahisi)' }
-])
+const props = defineProps({
+  date: { type: String, required: true },
+  rooms: { type: Array, default: () => [] },
+  operations: { type: Array, default: () => [] }
+})
 
-const draggedData = ref(null)
+const emit = defineEmits(['operation-updated'])
+
+const draggedOperation = ref(null)
 const activeHoverCell = ref(null)
 
-const scheduleData = ref([
-  {
-    id: 101, // 'is' hatası 'id' olarak düzeltildi
-    operation_name: 'Apendektomi',
-    surgeon_name: 'Dr. Ahmet',
-    duration_slot: 2,
-    room_id: 'OR-1',
-    start_slot: 2
-  }
-])
+const activeRooms = computed(() => props.rooms.length > 0 ? props.rooms : MOCK_ROOMS)
+const activeOperations = computed(() => props.operations.length > 0 ? props.operations : MOCK_OPERATIONS)
 
-const getSlotTime = (slotIdx) => {
-  const startHour = 8 // Yazım hatası düzeltildi
-  const totalMinutes = slotIdx * 30 
-  const hour = Math.floor(startHour + totalMinutes / 60)
-  const minutes = totalMinutes % 60 === 0 ? '00' : '30'
-  return `${hour.toString().padStart(2, '0')}:${minutes}`
-}
-
+// Ameliyatın başladığı ilk slotu bulur
 const getOperationAt = (roomId, slotIdx) => {
-  return scheduleData.value.find(
-    op => op.room_id === roomId && op.start_slot === slotIdx 
+  return activeOperations.value.find(
+    op => Number(op.room_id) === Number(roomId) && Number(op.start_slot) === Number(slotIdx)
   )
 }
 
-const handleDragStart = (event, operation, currentRoomId, currentSlot) => {
-  draggedData.value = {
-    operation,
-    fromRoomId: currentRoomId,
-    fromSlot: currentSlot 
-  }
-  event.dataTransfer.setData('text/plain', JSON.stringify(operation))
+// Ameliyatın kapsadığı sonraki slotların doluluğunu denetler
+const isSlotCoveredByOperation = (roomId, slotIdx) => {
+  return activeOperations.value.some(op => {
+    if (Number(op.room_id) !== Number(roomId)) return false
+    const start = Number(op.start_slot)
+    const duration = Number(op.duration_slot || 1)
+    return slotIdx > start && slotIdx < (start + duration)
+  })
+}
+
+const handleDragStart = (event, operation) => {
+  draggedOperation.value = operation
+  event.dataTransfer.setData('text/plain', String(operation.id))
   event.dataTransfer.effectAllowed = 'move'
 }
 
 const handleDragOver = (roomId, slotIdx) => {
-  activeHoverCell.value = `${roomId}-${slotIdx}` // Backtick eklendi
+  activeHoverCell.value = `${roomId}-${slotIdx}`
 }
 
 const handleDragLeave = () => {
-  activeHoverCell.value = null // Hover sıfırlama düzeltildi
+  activeHoverCell.value = null
 }
 
 const isDragOver = (roomId, slotIdx) => {
-  return activeHoverCell.value === `${roomId}-${slotIdx}` // Backtick eklendi
+  return activeHoverCell.value === `${roomId}-${slotIdx}`
 }
 
 const handleDrop = async (event, targetRoomId, targetSlot) => {
   activeHoverCell.value = null 
-  if (!draggedData.value) return
+  
+  const opId = event.dataTransfer.getData('text/plain') || draggedOperation.value?.id
+  if (!opId) return
 
-  const { operation, fromRoomId, fromSlot } = draggedData.value 
+  const operation = activeOperations.value.find(op => String(op.id) === String(opId))
+  if (!operation) return
 
-  if (fromRoomId === targetRoomId && fromSlot === targetSlot) return 
+  if (Number(operation.room_id) === Number(targetRoomId) && Number(operation.start_slot) === Number(targetSlot)) {
+    return
+  }
 
   try {
-    // URL Django endpoint'i ile eşitlendi
-    const response = await axios.post('http://localhost:8000/api/algorithm/manual-update/', {
+    const response = await axios.post(MANUAL_UPDATE_ENDPOINT, {
       operation_id: operation.id,
       target_room_id: targetRoomId,
       target_slot: targetSlot,
-      day_name: 'Pazartesi'
+      day_name: props.date
     })
 
     if (response.data.success) {
-      operation.room_id = targetRoomId 
-      operation.start_slot = targetSlot 
-      alert('Ameliyat yeri başarıyla güncellendi.')
+      emit('operation-updated', {
+        operationId: operation.id,
+        targetRoomId,
+        targetSlot
+      })
+      alert(MSG_UPDATE_SUCCESS)
     }
   } catch (error) {
-    const errorMsg = error.response?.data?.message || 'Bu konuma taşıma yapılamaz!'
-    alert(`Taşıma Başarısız: ${errorMsg}`) // Backtick eklendi
+    const errorMsg = error.response?.data?.message || MSG_UPDATE_ERROR
+    alert(`Taşıma Başarısız: ${errorMsg}`)
   } finally {
-    draggedData.value = null 
+    draggedOperation.value = null 
   }
 }
 </script>
 
 <style scoped>
 .schedule-container {
-    padding: 20px;
-    font-family:Arial,sans-serif;
+  padding: 20px;
+  font-family: Arial, sans-serif;
 }
 
 .grid-table {
-    display:flex;
-    border:1px solid #ddd;
-    overflow-x: auto ; 
+  display: flex;
+  border: 1px solid #ddd;
+  overflow-x: auto; 
 }
 
 .time-column {
-    width:130px;
-    flex-shrink: 0 ;
-    background-color: #f8f9fa;
-    border-right:20px solid #ccc;
+  width: 130px;
+  flex-shrink: 0;
+  background-color: #f8f9fa;
+  border-right: 2px solid #ccc;
 }
 
 .room-column {
-    flex: 1;
-    min-width:180px;
-    border-right:1px solid #eee;
+  flex: 1;
+  min-width: 180px;
+  border-right: 1px solid #eee;
 }
 
-
 .header-cell {
-    height: 45px;
-    background-color: #2c3e50;
-    color:white;
-    display: flex;
-    align-items:center;
-    justify-content: center;
-    font-weight:bold;
+  height: 45px;
+  background-color: #2c3e50;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
 }
 
 .time-cell {
-    height:60px;
-    border-bottom:1px solid #eee;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    font-size:12px;
-    color: #666;
+  height: 60px;
+  border-bottom: 1px solid #eee;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: #666;
+  box-sizing: border-box;
 }
 
 .slot-cell {
-    height:60px;
-    border-bottom:1px solid #eee;
-    padding:2px;
-    position:relative;
-    transition:background-color 0.2s;
+  height: 60px;
+  border-bottom: 1px solid #eee;
+  padding: 2px;
+  position: relative;
+  box-sizing: border-box;
+  transition: background-color 0.2s;
 }
 
 .slot-cell.drag-over {
-    background-color: #e3f2fd;
-    border:2px dashed #2196f3;
+  background-color: #e3f2fd;
+  border: 2px dashed #2196f3;
 }
 
 .operation-card {
-    background-color:#3498db;
-    color:white;
-    border-radius:6px;
-    padding: 6px;
-    height:100%;
-    cursor:grab;
-    box-shadow:0 2px 4px rgba(0,0,0,0.1);
-    display:flex;
-    flex-direction:column;
-    justify-content:space-between;
+  background-color: #3498db;
+  color: white;
+  border-radius: 6px;
+  padding: 6px;
+  height: 100%;
+  box-sizing: border-box;
+  cursor: grab;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  z-index: 2;
 }
-
 
 .operation-card:active {
-    cursor:grabbing;
-    opacity:0.7;
+  cursor: grabbing;
+  opacity: 0.7;
 }
 
-.card-header {font-size:13px;}
+.card-header { font-size: 13px; }
 
 .card-body {
-    font-size:11px;
-    display: flex;
-    flex-direction:column;
-    opacity:0.9;
+  font-size: 11px;
+  display: flex;
+  flex-direction: column;
+  opacity: 0.9;
 }
-
-
 </style>

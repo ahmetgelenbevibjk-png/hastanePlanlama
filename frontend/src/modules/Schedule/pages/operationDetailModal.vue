@@ -52,7 +52,7 @@
         <!-- Tahmini Süre -->
         <div class="detail-row">
           <span class="label">Tahmini Süre:</span>
-          <span class="value">⏱️ {{ (operation.duration_slot || 1) * 30 }} dakika</span>
+          <span class="value">⏱️ {{ (operation.duration_slot || 1) * SLOT_DURATION_MINUTES }} dakika</span>
         </div>
 
         <!-- Atanan Salon -->
@@ -71,6 +71,7 @@
 
 <script setup>
 import { computed } from 'vue'
+import { SLOT_DURATION_MINUTES } from '../scheduleConstants.js'
 
 const props = defineProps({
   isOpen: {
@@ -98,16 +99,13 @@ const surgeonDisplay = computed(() => {
   if (!props.operation) return null
   const op = props.operation
 
-  // 1. Backend'den metin olarak gelen isim
   if (op.surgeon_name) return op.surgeon_name
   if (op.doctor_name) return op.doctor_name
 
-  // 2. Obje olarak gelen cerrah verisi
   if (op.surgeon && typeof op.surgeon === 'object') {
     return op.surgeon.name || op.surgeon.full_name || op.surgeon.username
   }
 
-  // 3. Doğrudan metin geldiyse
   if (typeof op.surgeon === 'string' && isNaN(op.surgeon)) {
     return op.surgeon
   }

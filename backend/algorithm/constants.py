@@ -20,17 +20,16 @@ DEFAULT_FALLBACK_DAY = 'Perşembe'
 DEFAULT_UNASSIGNED_PENALTY = 35
 DEFAULT_MAX_PENALTY_LIMIT = 100
 ALTERNATIVE_MAX_PENALTY_LIMIT = 100
-MAX_TOLERABLE_PENALTY = 100  # DÜZELTME: Büyük harfe çevrildi (PEP 8)
+MAX_TOLERABLE_PENALTY = 100
 HIGH_PRIORITY_THRESHOLD = 3
 DEFAULT_NUM_CANDIDATES = 30
-max_tolerable_penalty = 100
 
 # Kural İhlal Ceza Ağırlıkları
 PENALTY_SPECIALTY_MISMATCH = 20
 PENALTY_ROOM_MISMATCH = 15
-PENALTY_CRITICAL_DELAY_WEIGHT = 2
-PENALTY_NORMAL_DELAY_WEIGHT = 5  # DÜZELTME: penalties.py içindeki hardcoded 5 sabite bağlandı
-PENALTY_REST_VIOLATION = 10
+PENALTY_CRITICAL_DELAY_WEIGHT = 10
+PENALTY_NORMAL_DELAY_WEIGHT = 3
+PENALTY_REST_VIOLATION = 10  # Import hatasını çözen değişken
 PENALTY_IDLE_SLOT = 1
 
 # Strateji Konfigürasyonları
@@ -62,7 +61,7 @@ STRATEGY_CONFIGS = [
     }
 ]
 
-# Ameliyathane - Branş Eşleşmeleri
+# Ameliyathane - Branş Eşleştirmeleri
 SPECIAL_ROOM_MAPPING = {
     'Genel Cerrahi': 'OR-1',
     'Kardiyoloji': 'OR-2',
@@ -81,7 +80,7 @@ DAY_MAPPING = {
     'Pazar': 'sunday'
 }
 
-# DÜZELTME: İngilizce -> Türkçe Ters Gün Haritası eklendi
+# İngilizce -> Türkçe Ters Gün Haritası
 DAY_MAPPING_EN_TO_TR = {
     'monday': 'Pazartesi',
     'tuesday': 'Salı',
@@ -93,12 +92,19 @@ DAY_MAPPING_EN_TO_TR = {
 }
 
 # Sayısal İndeks -> Türkçe Gün Dönüşümü
-DAYS_TR = {
-    0: 'Pazartesi',
-    1: 'Salı',
-    2: 'Çarşamba',
-    3: 'Perşembe',
-    4: 'Cuma',
-    5: 'Cumartesi',
-    6: 'Pazar'
-}
+DAYS_TR = [
+    'Pazartesi',
+    'Salı',
+    'Çarşamba',
+    'Perşembe',
+    'Cuma',
+    'Cumartesi',
+    'Pazar'
+]
+
+# GA Parametreleri
+GA_POPULATION_SIZE = 30
+GA_GENERATIONS = 40
+GA_MUTATION_RATE = 0.7
+GA_TOURNAMENT_SIZE = 3
+GA_ELITISM_RATE = 0.10

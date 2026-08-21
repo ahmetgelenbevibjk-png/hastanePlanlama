@@ -53,6 +53,10 @@
         <span class="stat-value">{{ scheduledOperations.length }}</span>
       </div>
       <div class="stat-card">
+        <span class="stat-label">Atanamayan Operasyon</span>
+        <span class="stat-value text-danger">{{ unassignedOperations.length }}</span>
+      </div>
+      <div class="stat-card">
         <span class="stat-label">Ortalama Doluluk</span>
         <span class="stat-value">%{{ occupancyRate }}</span>
       </div>
@@ -71,6 +75,7 @@
         :date="selectedDate"
         :rooms="rooms"
         :operations="scheduledOperations"
+        :unassigned-operations="unassignedOperations"
         :surgeons="surgeons"
         :anesthesia-teams="anesthesiaTeams"
         @select-operation="handleSelectOperation"
@@ -104,6 +109,13 @@ import ScheduleGrid from '../components/ScheduleGrid.vue'
 import CandidatesModal from '../components/CandidatesModal.vue'
 import OperationDetailModal from '../pages/OperationDetailModal.vue'
 import { ScheduleService } from '../services.js'
+import { 
+  TOTAL_DAILY_SLOTS, 
+  SLOT_DURATION_MINUTES, 
+  DEFAULT_OPERATION_DURATION, 
+  FITNESS_THRESHOLDS, 
+  DEFAULT_LOCALE 
+} from '../scheduleConstants.js'
 
 const getTodayString = () => {
   const d = new Date()
@@ -120,40 +132,14 @@ const loading = ref(false)
 const rooms = ref([])
 const operations = ref([])
 const scheduledOperations = ref([])
+const unassignedOperations = ref([])
 const surgeons = ref([])
 const anesthesiaTeams = ref([])
 
-// Başlangıç Skor ve Aday Plan Test Verileri
-const fitnessScore = ref(63.6)
-const selectedPlanId = ref(1)
-
-const candidatePlans = ref([
-  {
-    candidate_id: 1,
-    strategy_name: "Öncelik Odaklı Senaryo",
-    fitness_score: 63.6,
-    assigned_count: 7,
-    unassigned_count: 0,
-    total_penalty: 36.4,
-    penalties: [
-      { reason: "HIGH Öncelikli Vaka (P1) Geciktirildi", points: 15 },
-      { reason: "08:00 - 09:30 OR-1 Salon Atıl Süresi", points: 11.4 },
-      { reason: "Team-B Ekibinin Dinlenmesiz Ameliyat Dizilimi", points: 10 }
-    ]
-  },
-  {
-    candidate_id: 2,
-    strategy_name: "Erken Başlangıç Senaryosu",
-    fitness_score: 79.0,
-    assigned_count: 7,
-    unassigned_count: 0,
-    total_penalty: 21.0,
-    penalties: [
-      { reason: "08:00 Slotunda OR-4 Salonu Atıl Kaldı", points: 11.0 },
-      { reason: "Ekip Turnaround Süre Aşımı", points: 10.0 }
-    ]
-  }
-])
+// Skor ve Aday Planlar
+const fitnessScore = ref(null)
+const selectedPlanId = ref(null)
+const candidatePlans = ref([])
 
 // Modal Durum Kontrolleri
 const isCandidatesModalOpen = ref(false)
@@ -172,25 +158,28 @@ const closeDetailModal = () => {
 
 // Alternatif Plan Seçildiğinde Çizelgeyi Günceller
 const handleSelectPlan = (plan) => {
-  selectedPlanId.value = plan.candidate_id || plan.id
+  selectedPlanId.value = plan.id || plan.candidate_id
   fitnessScore.value = plan.fitness_score
-  if (plan.assigned && plan.assigned.length > 0) {
+  if (plan.assigned) {
     scheduledOperations.value = plan.assigned
+  }
+  if (plan.unassigned) {
+    unassignedOperations.value = plan.unassigned
   }
 }
 
 const fitnessColorClass = computed(() => {
   if (fitnessScore.value === null) return ''
-  if (fitnessScore.value >= 80) return 'text-success'
-  if (fitnessScore.value >= 50) return 'text-warning'
+  if (fitnessScore.value >= FITNESS_THRESHOLDS.HIGH) return 'text-success'
+  if (fitnessScore.value >= FITNESS_THRESHOLDS.MEDIUM) return 'text-warning'
   return 'text-danger'
 })
 
 const occupancyRate = computed(() => {
   if (rooms.value.length === 0) return 0
-  const totalAvailableSlots = rooms.value.length * 20
+  const totalAvailableSlots = rooms.value.length * TOTAL_DAILY_SLOTS
   const totalScheduledSlots = scheduledOperations.value.reduce((total, op) => {
-    const slots = op.duration_slot || Math.ceil((op.duration || 60) / 30)
+    const slots = op.duration_slot || Math.ceil((op.duration || DEFAULT_OPERATION_DURATION) / SLOT_DURATION_MINUTES)
     return total + slots
   }, 0)
 
@@ -210,6 +199,10 @@ const fetchScheduleData = async () => {
 
     scheduledOperations.value = allOps.filter(op =>
       (op.room_id || op.room) && (op.start_slot !== null && op.start_slot !== undefined)
+    )
+
+    unassignedOperations.value = allOps.filter(op =>
+      !(op.room_id || op.room) || op.start_slot === null || op.start_slot === undefined
     )
 
     if (ScheduleService.getSurgeons) {
@@ -238,7 +231,7 @@ const runOptimizer = async () => {
   try {
     const [year, month, day] = selectedDate.value.split('-').map(Number)
     const dateObj = new Date(year, month - 1, day)
-    const dayName = dateObj.toLocaleDateString('tr-TR', { weekday: 'long' })
+    const dayName = dateObj.toLocaleDateString(DEFAULT_LOCALE, { weekday: 'long' })
 
     const response = await ScheduleService.runScheduler({
       date: selectedDate.value,
@@ -247,24 +240,17 @@ const runOptimizer = async () => {
 
     const resData = response.data
     if (resData) {
-      if (resData.best_plan) {
-        fitnessScore.value = resData.best_plan.fitness_score
-        scheduledOperations.value = resData.best_plan.assigned || []
-        selectedPlanId.value = resData.best_plan.candidate_id
-      } else if (resData.fitness_score !== undefined) {
-        fitnessScore.value = resData.fitness_score
-        scheduledOperations.value = resData.assigned || []
+      fitnessScore.value = resData.fitness_score ?? null
+      scheduledOperations.value = resData.assigned || []
+      unassignedOperations.value = resData.unassigned || []
+
+      const candidatesList = resData.candidates || resData.all_candidates || []
+      candidatePlans.value = candidatesList
+
+      if (candidatesList.length > 0) {
+        selectedPlanId.value = candidatesList[0].id || candidatesList[0].candidate_id
+        isCandidatesModalOpen.value = true
       }
-
-      const candidatesList = resData.all_candidates || resData.candidates
-      if (candidatesList && candidatesList.length > 0) {
-        candidatePlans.value = candidatesList
-      }
-
-      const assignedCount = resData.best_plan?.assigned_count || scheduledOperations.value.length
-      const unassignedCount = resData.best_plan?.unassigned_count || 0
-
-      alert(`Optimizasyon tamamlandı!\n- Üretilen Alternatif Senaryo: ${candidatePlans.value.length}\n- Atanan Operasyon: ${assignedCount}\n- Atanamayan Operasyon: ${unassignedCount}`)
     }
   } catch (error) {
     console.error('Planlama hatası:', error)
@@ -331,9 +317,7 @@ onMounted(() => {
   font-size: 0.9rem;
   color: #1e293b;
 }
-.date-input:focus {
-  border-color: #2563eb;
-}
+.date-input:focus {border-color: #2563eb;}
 
 .btn-results {
   background-color: #4f46e5;
@@ -347,10 +331,7 @@ onMounted(() => {
   transition: all 0.2s ease;
   box-shadow: 0 2px 4px rgba(79, 70, 229, 0.2);
 }
-.btn-results:hover {
-  background-color: #4338ca;
-  transform: translateY(-1px);
-}
+.btn-results:hover {background-color: #4338ca; transform: translateY(-1px);}
 
 .btn-run {
   background-color: #2563eb;
@@ -400,18 +381,10 @@ onMounted(() => {
   color: #0f172a;
 }
 
-.fitness-card {
-  border-left-color: #059669 !important;
-}
-.text-success {
-  color: #059669;
-}
-.text-warning {
-  color: #d97706;
-}
-.text-danger {
-  color: #dc2626;
-}
+.fitness-card {border-left-color: #059669 !important;}
+.text-success {color: #059669;}
+.text-warning {color: #d97706;}
+.text-danger {color: #dc2626;}
 
 .grid-card {
   background-color: #ffffff;
